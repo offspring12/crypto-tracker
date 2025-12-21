@@ -1,11 +1,11 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Asset, PortfolioSummary, Transaction, HistorySnapshot } from './types';
 import { fetchCryptoPrice, fetchAssetHistory, delay } from './services/geminiService';
 import { AssetCard } from './components/AssetCard';
 import { AddAssetForm } from './components/AddAssetForm';
 import { Summary } from './components/Summary';
-import { Wallet, Download, Upload } from 'lucide-react';
+import { ApiKeySettings } from './components/ApiKeySettings';
+import { Wallet, Download, Upload, Settings, Key } from 'lucide-react';
 
 const App: React.FC = () => {
   const [assets, setAssets] = useState<Asset[]>(() => {
@@ -19,7 +19,21 @@ const App: React.FC = () => {
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check if API key exists
+  useEffect(() => {
+    const checkApiKey = () => {
+      const key = localStorage.getItem('gemini_api_key');
+      setHasApiKey(!!key);
+    };
+    checkApiKey();
+    // Check again when settings modal closes
+    window.addEventListener('storage', checkApiKey);
+    return () => window.removeEventListener('storage', checkApiKey);
+  }, [isSettingsOpen]);
 
   const summary: PortfolioSummary = assets.reduce((acc, asset) => {
     const assetValue = asset.quantity * asset.currentPrice;
@@ -75,8 +89,8 @@ const App: React.FC = () => {
         isUpdating: false,
         error: undefined 
       } : a));
-    } catch (error) {
-       setAssets(prev => prev.map(a => a.id === id ? { ...a, isUpdating: false, error: 'Failed' } : a));
+    } catch (error: any) {
+       setAssets(prev => prev.map(a => a.id === id ? { ...a, isUpdating: false, error: error.message || 'Failed' } : a));
     }
   };
 
@@ -101,8 +115,8 @@ const App: React.FC = () => {
         setAssets(prev => prev.map(a => a.id === newId ? { ...a, currentPrice: result.price, sources: result.sources, isUpdating: false } : a));
         const historyData = await fetchAssetHistory(ticker);
         if (historyData) setAssets(prev => prev.map(a => a.id === newId ? { ...a, priceHistory: historyData } : a));
-      } catch (error) {
-         setAssets(prev => prev.map(a => a.id === newId ? { ...a, isUpdating: false, error: 'Failed' } : a));
+      } catch (error: any) {
+         setAssets(prev => prev.map(a => a.id === newId ? { ...a, isUpdating: false, error: error.message || 'Failed' } : a));
       }
     }
   };
@@ -171,12 +185,40 @@ const App: React.FC = () => {
             <h1 className="text-xl font-bold text-white">Portfolio Tracker</h1>
           </div>
           <div className="flex items-center gap-2">
+             <button 
+               onClick={() => setIsSettingsOpen(true)} 
+               className={`p-2 rounded-lg transition-colors ${hasApiKey ? 'text-emerald-400 hover:text-emerald-300' : 'text-amber-400 hover:text-amber-300 animate-pulse'}`}
+               title={hasApiKey ? "API Key Configured" : "Configure API Key"}
+             >
+               {hasApiKey ? <Key size={20} /> : <Settings size={20} />}
+             </button>
              <input type="file" ref={fileInputRef} onChange={importPortfolio} accept=".json" className="hidden" />
              <button onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-white" title="Import Data"><Upload size={20} /></button>
              <button onClick={exportPortfolio} className="p-2 text-slate-400 hover:text-white" title="Export Data"><Download size={20} /></button>
           </div>
         </div>
       </header>
+
+      {!hasApiKey && (
+        <div className="max-w-5xl mx-auto px-4 pt-4">
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 flex items-start gap-3">
+            <Key className="text-amber-400 flex-shrink-0 mt-0.5" size={20} />
+            <div className="flex-1">
+              <p className="text-amber-200 font-medium mb-1">API Key Required</p>
+              <p className="text-amber-200/80 text-sm mb-3">
+                To fetch cryptocurrency prices, you need to configure your Gemini API key.
+              </p>
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className="bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                Configure API Key
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="max-w-5xl mx-auto px-4 py-8">
         <Summary summary={summary} assets={assets} onRefreshAll={handleRefreshAll} isGlobalLoading={isLoading} />
         <AddAssetForm onAdd={handleAddAsset} isGlobalLoading={isLoading} />
@@ -195,6 +237,8 @@ const App: React.FC = () => {
           ))}
         </div>
       </main>
+
+      <ApiKeySettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </div>
   );
 };
