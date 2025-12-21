@@ -11,11 +11,11 @@ interface PriceResult {
 
 export const fetchCryptoPrice = async (ticker: string): Promise<PriceResult> => {
   try {
-    // Get API key from Vite environment variable
-    const apiKey = import.meta.env.VITE_API_KEY || '';
+    // Get API key from localStorage
+    const apiKey = localStorage.getItem('gemini_api_key') || '';
     
     if (!apiKey) {
-      throw new Error("API key not configured");
+      throw new Error("API key not configured. Please add your API key in settings.");
     }
 
     const ai = new GoogleGenAI({ apiKey });
