@@ -22,21 +22,26 @@ export const fetchTokenPriceFromDex = async (contractAddress: string): Promise<P
     
     const data = await res.json();
     
-    console.log('DEXScreener response:', data); // Debug log
+    console.log('DEXScreener full response:', data);
     
     if (!data.pairs || data.pairs.length === 0) {
       throw new Error('No trading pairs found for this token');
     }
     
-    // Sort by FDV (fully diluted valuation) and liquidity - prefer higher values
+    // Sort by liquidity USD (highest first)
     const sortedPairs = data.pairs
       .filter((pair: any) => {
         const hasPrice = pair.priceUsd && parseFloat(pair.priceUsd) > 0;
-        console.log('Pair:', pair.baseToken?.symbol, 'Price:', pair.priceUsd, 'Liquidity:', pair.liquidity, 'FDV:', pair.fdv);
+        const liquidityUsd = parseFloat(pair.liquidity?.usd || 0);
+        console.log('Checking pair:', {
+          symbol: pair.baseToken?.symbol,
+          dex: pair.dexId,
+          priceUsd: pair.priceUsd,
+          liquidityUsd: liquidityUsd
+        });
         return hasPrice;
       })
       .sort((a: any, b: any) => {
-        // Prefer pairs with higher liquidity
         const liquidityA = parseFloat(a.liquidity?.usd || 0);
         const liquidityB = parseFloat(b.liquidity?.usd || 0);
         return liquidityB - liquidityA;
@@ -47,26 +52,37 @@ export const fetchTokenPriceFromDex = async (contractAddress: string): Promise<P
     }
     
     const bestPair = sortedPairs[0];
-    const price = parseFloat(bestPair.priceUsd);
     
-    console.log('Selected pair:', bestPair.baseToken?.symbol, 'on', bestPair.dexId, 'Price:', price);
+    // CRITICAL FIX: Parse priceUsd as string first, then to number
+    const priceStr = bestPair.priceUsd;
+    const price = parseFloat(priceStr);
+    
+    console.log('Selected best pair:', {
+      symbol: bestPair.baseToken?.symbol,
+      dex: bestPair.dexId,
+      priceUsdString: priceStr,
+      priceNumber: price,
+      liquidityUsd: bestPair.liquidity?.usd
+    });
     
     if (isNaN(price) || price <= 0) {
-      throw new Error('Invalid price data from DEXScreener');
+      throw new Error(`Invalid price data: ${priceStr}`);
     }
     
     const tokenName = bestPair.baseToken?.name || 'Unknown Token';
     const tokenSymbol = bestPair.baseToken?.symbol || contractAddress.slice(0, 8);
+    
+    const liquidityUsdFormatted = (parseFloat(bestPair.liquidity?.usd || 0) / 1000000).toFixed(2);
     
     return {
       price,
       name: tokenName,
       symbol: tokenSymbol,
       sources: [{
-        title: `${bestPair.dexId} (${bestPair.chainId}) - Liquidity: $${(parseFloat(bestPair.liquidity?.usd || 0) / 1000000).toFixed(2)}M`,
+        title: `${bestPair.dexId} (${bestPair.chainId}) - Liq: $${liquidityUsdFormatted}M`,
         url: bestPair.url || `https://dexscreener.com/${bestPair.chainId}/${bestPair.pairAddress}`
       }],
-      rawText: `${tokenName} (${tokenSymbol}) - $${price.toFixed(8)} from ${bestPair.dexId} on ${bestPair.chainId}`
+      rawText: `${tokenName} (${tokenSymbol}) - $${price} from ${bestPair.dexId} on ${bestPair.chainId}`
     };
   } catch (error: any) {
     console.error('DEXScreener error:', error);
