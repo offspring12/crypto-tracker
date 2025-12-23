@@ -168,10 +168,37 @@ Return ONLY the current numeric price value in USD. No symbols, no explanations.
 };
 
 export const fetchAssetHistory = async (ticker: string): Promise<number[][] | undefined> => {
+  // For contract addresses, try CoinGecko first
   if (isContractAddress(ticker)) {
+    try {
+      const normalizedAddress = ticker.toLowerCase();
+      console.log('📈 Fetching history for contract address from CoinGecko:', normalizedAddress);
+      
+      // CoinGecko API endpoint for token market chart by contract address
+      const res = await fetch(
+        `https://api.coingecko.com/api/v3/coins/ethereum/contract/${normalizedAddress}/market_chart/?vs_currency=usd&days=365`
+      );
+      
+      if (res.ok) {
+        const json = await res.json();
+        console.log('✅ CoinGecko history received:', json.prices?.length, 'data points');
+        
+        if (json.prices && json.prices.length > 0) {
+          // CoinGecko returns [[timestamp, price], ...]
+          return json.prices.filter((p: any) => p[1] > 0);
+        }
+      } else {
+        console.warn('⚠️ CoinGecko API returned status:', res.status);
+      }
+    } catch (e) {
+      console.warn('⚠️ CoinGecko history fetch failed:', e);
+    }
+    
+    // If CoinGecko fails, return undefined (no history for this DEX token)
     return undefined;
   }
   
+  // For regular tickers, use CryptoCompare
   try {
      const res = await fetch(`https://min-api.cryptocompare.com/data/v2/histoday?fsym=${ticker.toUpperCase()}&tsym=USD&limit=2000`);
      if (res.ok) {
