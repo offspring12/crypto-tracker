@@ -512,8 +512,11 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                       <div 
                         className="absolute bg-slate-800/95 border border-slate-600 rounded p-4 shadow-2xl z-30 min-w-[280px] backdrop-blur tooltip-container"
                         style={{ 
-                           left: Math.min(Math.max(0, hoverData.x - 140), (chartContainerRef.current?.offsetWidth || 300) - 280),
-                           top: -20,
+                          left: hoverData.x > ((chartContainerRef.current?.offsetWidth || 300) / 2) 
+                            ? Math.max(0, hoverData.x - 280 - 20)  // Right side: show tooltip on left
+                            : Math.min(hoverData.x + 20, (chartContainerRef.current?.offsetWidth || 300) - 280), // Left side: show tooltip on right
+                          top: 20,
+                          pointerEvents: 'none'
                         }}
                       >
                          <div className="text-xs text-slate-400 mb-2 border-b border-slate-700 pb-1 font-mono">
@@ -546,7 +549,7 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                                     const plPct = cost > 0 ? (pl / cost) * 100 : 0;
                                     
                                     return { 
-                                        ticker: a.ticker, 
+                                        ticker: a.name || a.ticker, 
                                         val,
                                         pl,
                                         plPct,
