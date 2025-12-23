@@ -130,7 +130,7 @@ const App: React.FC = () => {
           isUpdating: false,
           name: result.name || result.symbol || a.name
         } : a));
-        const historyData = await fetchAssetHistory(ticker);
+        const historyData = await fetchAssetHistory(ticker, result.price, result.symbol);
         if (historyData) setAssets(prev => prev.map(a => a.id === newId ? { ...a, priceHistory: historyData } : a));
       } catch (error: any) {
          setAssets(prev => prev.map(a => a.id === newId ? { ...a, isUpdating: false, error: error.message || 'Failed' } : a));

@@ -441,7 +441,7 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                         <div key={asset.id} className="flex items-center justify-between text-xs">
                              <div className="flex items-center gap-2">
                                 <div className="w-2.5 h-2.5 rounded-sm" style={{ background: CHART_COLORS[index % CHART_COLORS.length]}}></div>
-                                <span className="text-slate-200 font-medium">{asset.ticker}</span>
+                                <span className="text-slate-200 font-medium">{asset.name || asset.ticker}</span>
                              </div>
                              <div className="flex items-center gap-3">
                                 <span className="text-slate-400">{currentPct.toFixed(1)}%</span>

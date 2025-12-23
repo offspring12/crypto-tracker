@@ -167,14 +167,54 @@ Return ONLY the current numeric price value in USD. No symbols, no explanations.
   }
 };
 
-export const fetchAssetHistory = async (ticker: string): Promise<number[][] | undefined> => {
-  // For contract addresses, try CoinGecko first
+export const fetchAssetHistory = async (ticker: string, currentPrice?: number, tokenSymbol?: string): Promise<number[][] | undefined> => {
+  // For contract addresses with a known symbol, try CryptoCompare first
+  if (isContractAddress(ticker) && tokenSymbol) {
+    try {
+      console.log(`📈 Trying CryptoCompare for DEX token symbol: ${tokenSymbol}`);
+      
+      const res = await fetch(`https://min-api.cryptocompare.com/data/v2/histoday?fsym=${tokenSymbol.toUpperCase()}&tsym=USD&limit=2000`);
+      
+      if (res.ok) {
+        const json = await res.json();
+        
+        if (json.Response === 'Success' && json.Data?.Data?.length > 0) {
+          const historyData = json.Data.Data
+            .map((d: any) => [d.time * 1000, d.close])
+            .filter((p: any) => p[1] > 0);
+          
+          // Verify the latest price is reasonably close to current price (within 50% either way)
+          if (currentPrice && historyData.length > 0) {
+            const latestHistoricalPrice = historyData[historyData.length - 1][1];
+            const priceRatio = latestHistoricalPrice / currentPrice;
+            
+            console.log(`🔍 Price verification: Historical=${latestHistoricalPrice}, Current=${currentPrice}, Ratio=${priceRatio}`);
+            
+            // If prices are within reasonable range (0.5x to 2x), it's likely the right token
+            if (priceRatio >= 0.5 && priceRatio <= 2.0) {
+              console.log(`✅ CryptoCompare history validated for ${tokenSymbol}`);
+              return historyData;
+            } else {
+              console.warn(`⚠️ Price mismatch - probably different token with same symbol`);
+            }
+          } else {
+            // No current price to verify, use data anyway
+            console.log(`✅ CryptoCompare history found for ${tokenSymbol} (no price verification)`);
+            return historyData;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ CryptoCompare fetch failed:', e);
+    }
+  }
+  
+  // For contract addresses, try CoinGecko as fallback
   if (isContractAddress(ticker)) {
     try {
       const normalizedAddress = ticker.toLowerCase();
       console.log('📈 Fetching history for contract address from CoinGecko:', normalizedAddress);
       
-      // CoinGecko API endpoint for token market chart by contract address
       const res = await fetch(
         `https://api.coingecko.com/api/v3/coins/ethereum/contract/${normalizedAddress}/market_chart/?vs_currency=usd&days=365`
       );
@@ -184,7 +224,6 @@ export const fetchAssetHistory = async (ticker: string): Promise<number[][] | un
         console.log('✅ CoinGecko history received:', json.prices?.length, 'data points');
         
         if (json.prices && json.prices.length > 0) {
-          // CoinGecko returns [[timestamp, price], ...]
           return json.prices.filter((p: any) => p[1] > 0);
         }
       } else {
@@ -194,11 +233,10 @@ export const fetchAssetHistory = async (ticker: string): Promise<number[][] | un
       console.warn('⚠️ CoinGecko history fetch failed:', e);
     }
     
-    // If CoinGecko fails, return undefined (no history for this DEX token)
     return undefined;
   }
   
-  // For regular tickers, use CryptoCompare
+  // For regular tickers, use CryptoCompare directly
   try {
      const res = await fetch(`https://min-api.cryptocompare.com/data/v2/histoday?fsym=${ticker.toUpperCase()}&tsym=USD&limit=2000`);
      if (res.ok) {
