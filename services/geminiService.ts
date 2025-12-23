@@ -12,16 +12,20 @@ interface PriceResult {
 }
 
 const isContractAddress = (input: string): boolean => {
-  const result = input.startsWith('0x') && input.length >= 40;
-  console.log('🔍 isContractAddress check:', { input, startsWithOx: input.startsWith('0x'), length: input.length, result });
+  const lowerInput = input.toLowerCase();
+  const result = lowerInput.startsWith('0x') && input.length >= 40;
+  console.log('🔍 isContractAddress check:', { input, lowerInput, startsWithOx: lowerInput.startsWith('0x'), length: input.length, result });
   return result;
 };
 
 export const fetchTokenPriceFromDex = async (contractAddress: string): Promise<PriceResult> => {
   console.log('🚀 fetchTokenPriceFromDex called with:', contractAddress);
   
+  // Normalize to lowercase for API call
+  const normalizedAddress = contractAddress.toLowerCase();
+  
   try {
-    const url = `https://api.dexscreener.com/latest/dex/tokens/${contractAddress}`;
+    const url = `https://api.dexscreener.com/latest/dex/tokens/${normalizedAddress}`;
     console.log('📡 Fetching from URL:', url);
     
     const res = await fetch(url);

@@ -54,7 +54,10 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onAdd, isGlobalLoadi
               id="ticker"
               type="text"
               value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
+              onChange={(e) => {const value = e.target.value;
+  // Only uppercase if it's NOT a contract address
+              setTicker(value.startsWith('0x') && value.length > 10 ? value : value.toUpperCase());
+              }}
               placeholder="BTC or 0x"
               className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2.5 text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder-slate-600 uppercase"
               required
