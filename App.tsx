@@ -6,7 +6,7 @@ import { AddAssetForm } from './components/AddAssetForm';
 import { Summary } from './components/Summary';
 import { ApiKeySettings } from './components/ApiKeySettings';
 import { PortfolioManager } from './components/PortfolioManager';
-import { Wallet, Download, Upload, Settings, Key, FolderOpen } from 'lucide-react';
+import { Wallet, Download, Upload, Settings, Key, FolderOpen, Plus, Check } from 'lucide-react';
 
 // Portfolio colors for visual distinction
 const PORTFOLIO_COLORS = [
@@ -285,7 +285,7 @@ const App: React.FC = () => {
   };
 
   const exportPortfolio = () => {
-    // Export ALL portfolios + price snapshots
+    // Export ALL portfolios + price snapshots + deleted portfolios
     const snapshots: Record<string, any> = {};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -296,7 +296,13 @@ const App: React.FC = () => {
       }
     }
     
-    const dataStr = JSON.stringify({ portfolios, priceSnapshots: snapshots }, null, 2);
+    const deletedPortfolios = JSON.parse(localStorage.getItem('deleted_portfolios') || '[]');
+    
+    const dataStr = JSON.stringify({ 
+      portfolios, 
+      deletedPortfolios,
+      priceSnapshots: snapshots 
+    }, null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -367,9 +373,20 @@ const App: React.FC = () => {
     const portfolio = portfolios.find(p => p.id === id);
     if (portfolio && portfolio.assets.length > 0) {
       const confirmed = window.confirm(
-        `"${portfolio.name}" contains ${portfolio.assets.length} asset(s). Are you sure you want to delete it? This will be saved in your next backup.`
+        `"${portfolio.name}" contains ${portfolio.assets.length} asset(s). Are you sure you want to delete it? It will be saved in deleted portfolios (can be restored from export).`
       );
       if (!confirmed) return;
+    }
+    
+    // Save to deleted portfolios before removing
+    if (portfolio) {
+      const deletedPortfolios = JSON.parse(localStorage.getItem('deleted_portfolios') || '[]');
+      deletedPortfolios.push({
+        ...portfolio,
+        deletedAt: new Date().toISOString()
+      });
+      localStorage.setItem('deleted_portfolios', JSON.stringify(deletedPortfolios));
+      console.log(`💾 Saved deleted portfolio "${portfolio.name}" to backup`);
     }
     
     setPortfolios(prev => prev.filter(p => p.id !== id));
@@ -386,14 +403,54 @@ const App: React.FC = () => {
             <div className="bg-indigo-600 p-2 rounded-lg"><Wallet className="text-white" size={24} /></div>
             <h1 className="text-xl font-bold text-white">Portfolio Tracker</h1>
             {activePortfolio && (
-              <div 
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/50"
-                style={{ borderLeftColor: activePortfolio.color, borderLeftWidth: '3px' }}
-              >
-                <FolderOpen size={16} style={{ color: activePortfolio.color }} />
-                <span className="text-sm font-medium" style={{ color: activePortfolio.color }}>
-                  {activePortfolio.name}
-                </span>
+              <div className="relative group">
+                <button 
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/50 hover:bg-slate-800 transition-colors"
+                  style={{ borderLeftColor: activePortfolio.color, borderLeftWidth: '3px' }}
+                >
+                  <FolderOpen size={16} style={{ color: activePortfolio.color }} />
+                  <span className="text-sm font-medium" style={{ color: activePortfolio.color }}>
+                    {activePortfolio.name}
+                  </span>
+                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                
+                {/* Dropdown Menu */}
+                <div className="absolute top-full left-0 mt-2 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                  <div className="p-2 max-h-80 overflow-y-auto">
+                    {portfolios.map(portfolio => (
+                      <button
+                        key={portfolio.id}
+                        onClick={() => setActivePortfolioId(portfolio.id)}
+                        className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2 transition-colors ${
+                          portfolio.id === activePortfolioId
+                            ? 'bg-indigo-600/20 text-indigo-400'
+                            : 'hover:bg-slate-700/50 text-slate-300'
+                        }`}
+                      >
+                        <div 
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: portfolio.color }}
+                        />
+                        <span className="flex-1 text-sm font-medium">{portfolio.name}</span>
+                        {portfolio.id === activePortfolioId && (
+                          <Check size={14} className="text-indigo-400" />
+                        )}
+                      </button>
+                    ))}
+                    <div className="border-t border-slate-700 mt-2 pt-2">
+                      <button
+                        onClick={() => setIsPortfolioManagerOpen(true)}
+                        className="w-full text-left px-3 py-2 rounded-lg flex items-center gap-2 text-slate-400 hover:text-indigo-400 hover:bg-slate-700/50 transition-colors"
+                      >
+                        <Plus size={14} />
+                        <span className="text-sm font-medium">New Portfolio</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -413,8 +470,8 @@ const App: React.FC = () => {
               {hasApiKey ? <Key size={20} /> : <Settings size={20} />}
             </button>
             <input type="file" ref={fileInputRef} onChange={importPortfolio} accept=".json" className="hidden" />
-            <button onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-white" title="Import Data"><Upload size={20} /></button>
-            <button onClick={exportPortfolio} className="p-2 text-slate-400 hover:text-white" title="Export Data"><Download size={20} /></button>
+            <button onClick={exportPortfolio} className="p-2 text-slate-400 hover:text-white" title="Export Data"><Upload size={20} /></button>
+            <button onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-white" title="Import Data"><Download size={20} /></button>
           </div>
         </div>
       </header>
