@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot, TransactionTag, Currency } from './types';
-import { fetchCryptoPrice, fetchAssetHistory, delay, detectAssetType, fetchExchangeRates, convertCurrency } from './services/geminiService';
+import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot, TransactionTag } from './types';
+import { fetchCryptoPrice, fetchAssetHistory, delay } from './services/geminiService';
 import { AssetCard } from './components/AssetCard';
 import { AddAssetForm } from './components/AddAssetForm';
 import { Summary } from './components/Summary';
 import { ApiKeySettings } from './components/ApiKeySettings';
 import { PortfolioManager } from './components/PortfolioManager';
-import { Wallet, Download, Upload, Settings, Key, FolderOpen, Plus, Check, Filter } from 'lucide-react';
+import { Wallet, Download, Upload, Settings, Key, FolderOpen, Plus, Check } from 'lucide-react';
 
 // Portfolio colors for visual distinction
 const PORTFOLIO_COLORS = [
@@ -60,7 +60,7 @@ const migrateToPortfolios = (): Portfolio[] => {
   return [migratedPortfolio];
 };
 
-// NEW: Migrate transactions to include required tags, asset types, and createdAt
+// NEW: Migrate transactions to include required tags and asset types
 const migrateTransactionTags = (portfolios: Portfolio[]): Portfolio[] => {
   return portfolios.map(portfolio => ({
     ...portfolio,
@@ -69,8 +69,7 @@ const migrateTransactionTags = (portfolios: Portfolio[]): Portfolio[] => {
       assetType: asset.assetType || 'CRYPTO', // Default to CRYPTO
       transactions: asset.transactions.map(tx => ({
         ...tx,
-        tag: tx.tag || 'DCA', // Default untagged transactions to DCA
-        createdAt: tx.createdAt || tx.date || new Date().toISOString() // Use transaction date as createdAt if missing
+        tag: tx.tag || 'DCA' // Default untagged transactions to DCA
       }))
     }))
   }));
@@ -96,41 +95,12 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPortfolioManagerOpen, setIsPortfolioManagerOpen] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
-  const [displayCurrency, setDisplayCurrency] = useState<Currency>('USD');
-  const [exchangeRate, setExchangeRate] = useState(1.0); // CHF to USD rate
-  const [assetTypeFilter, setAssetTypeFilter] = useState<'ALL' | 'CRYPTO' | 'STOCK' | 'CASH'>('ALL');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Get active portfolio
   const activePortfolio = portfolios.find(p => p.id === activePortfolioId) || portfolios[0];
   const assets = activePortfolio?.assets || [];
   const history = activePortfolio?.history || [];
-
-  // Filter assets by type
-  const filteredAssets = assets.filter(asset => {
-    if (assetTypeFilter === 'ALL') return true;
-    return asset.assetType === assetTypeFilter;
-  });
-
-  // Currency conversion helper
-  const convertCurrency = (amountInUSD: number): number => {
-    if (displayCurrency === 'USD') return amountInUSD;
-    return amountInUSD / exchangeRate; // Convert USD to CHF
-  };
-
-  const formatCurrency = (amount: number): string => {
-    const converted = convertCurrency(amount);
-    if (displayCurrency === 'CHF') {
-      return new Intl.NumberFormat('de-CH', { 
-        style: 'currency', 
-        currency: 'CHF' 
-      }).format(converted);
-    }
-    return new Intl.NumberFormat('en-US', { 
-      style: 'currency', 
-      currency: 'USD' 
-    }).format(converted);
-  };
 
   useEffect(() => {
     const checkApiKey = () => {
@@ -141,19 +111,6 @@ const App: React.FC = () => {
     window.addEventListener('storage', checkApiKey);
     return () => window.removeEventListener('storage', checkApiKey);
   }, [isSettingsOpen]);
-
-  // Fetch exchange rates on mount
-  useEffect(() => {
-    const loadExchangeRates = async () => {
-      try {
-        const rates = await fetchExchangeRates();
-        setExchangeRate(rates.CHF_USD);
-      } catch (e) {
-        console.error('Failed to load exchange rates:', e);
-      }
-    };
-    loadExchangeRates();
-  }, []);
 
   // Save portfolios to localStorage
   useEffect(() => {
@@ -241,7 +198,7 @@ const App: React.FC = () => {
     }
   };
 
-  // UPDATED: Add transaction with tag support and auto-detect asset type
+  // UPDATED: Add transaction with tag support
   const handleAddAsset = async (
     ticker: string, 
     quantity: number, 
@@ -280,12 +237,6 @@ const App: React.FC = () => {
       }));
     } else {
       const newId = Math.random().toString(36).substr(2, 9);
-      
-      // Auto-detect asset type and currency
-      const detected = detectAssetType(ticker);
-      
-      console.log(`🎯 Auto-detected: ${ticker} → Type: ${detected.assetType}, Currency: ${detected.currency}`);
-      
       const tempAsset: Asset = { 
         id: newId, 
         ticker, 
@@ -298,8 +249,7 @@ const App: React.FC = () => {
         transactions: [newTx], 
         avgBuyPrice: pricePerCoin, 
         totalCostBasis: totalCost,
-        assetType: detected.assetType,
-        currency: detected.currency
+        assetType: 'CRYPTO' // Default to CRYPTO for now (P0.3 will auto-detect)
       };
       
       updateActivePortfolio(portfolio => ({
@@ -316,21 +266,16 @@ const App: React.FC = () => {
             currentPrice: result.price, 
             sources: result.sources, 
             isUpdating: false,
-            name: result.name || result.symbol || a.name,
-            assetType: result.assetType || a.assetType, // Update from API if available
-            currency: result.currency || a.currency
+            name: result.name || result.symbol || a.name
           } : a)
         }));
         
-        // Only fetch history for crypto and stocks, skip for cash
-        if (assetType !== 'CASH') {
-          const historyData = await fetchAssetHistory(ticker, result.price, result.symbol);
-          if (historyData) {
-            updateActivePortfolio(portfolio => ({
-              ...portfolio,
-              assets: portfolio.assets.map(a => a.id === newId ? { ...a, priceHistory: historyData } : a)
-            }));
-          }
+        const historyData = await fetchAssetHistory(ticker, result.price, result.symbol);
+        if (historyData) {
+          updateActivePortfolio(portfolio => ({
+            ...portfolio,
+            assets: portfolio.assets.map(a => a.id === newId ? { ...a, priceHistory: historyData } : a)
+          }));
         }
       } catch (error: any) {
         updateActivePortfolio(portfolio => ({
@@ -589,64 +534,6 @@ const App: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {/* Currency Selector */}
-            <div className="flex items-center bg-slate-800/50 rounded-lg border border-slate-700 overflow-hidden">
-              <button
-                onClick={() => setDisplayCurrency('USD')}
-                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                  displayCurrency === 'USD' 
-                    ? 'bg-indigo-600 text-white' 
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                USD
-              </button>
-              <button
-                onClick={() => setDisplayCurrency('CHF')}
-                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                  displayCurrency === 'CHF' 
-                    ? 'bg-indigo-600 text-white' 
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                CHF
-              </button>
-            </div>
-
-            {/* Asset Type Filter */}
-            <div className="relative group">
-              <button 
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/50 hover:bg-slate-800 transition-colors text-sm"
-                title="Filter by asset type"
-              >
-                <Filter size={16} className="text-slate-400" />
-                <span className="text-slate-300 font-medium">
-                  {assetTypeFilter === 'ALL' ? 'All Assets' : assetTypeFilter}
-                </span>
-                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              
-              <div className="absolute top-full right-0 mt-2 w-40 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                <div className="p-2">
-                  {(['ALL', 'CRYPTO', 'STOCK', 'CASH'] as const).map(filter => (
-                    <button
-                      key={filter}
-                      onClick={() => setAssetTypeFilter(filter)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                        assetTypeFilter === filter
-                          ? 'bg-indigo-600/20 text-indigo-400'
-                          : 'text-slate-300 hover:bg-slate-700/50'
-                      }`}
-                    >
-                      {filter === 'ALL' ? 'All Assets' : filter}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
             <button 
               onClick={() => setIsPortfolioManagerOpen(true)} 
               className="p-2 text-slate-400 hover:text-white transition-colors"
@@ -691,21 +578,8 @@ const App: React.FC = () => {
       <main className="max-w-screen-2xl mx-auto px-8 py-8">
         <Summary summary={summary} assets={assets} onRefreshAll={handleRefreshAll} isGlobalLoading={isLoading} />
         <AddAssetForm onAdd={handleAddAsset} isGlobalLoading={isLoading} />
-        
-        {filteredAssets.length === 0 && assetTypeFilter !== 'ALL' && (
-          <div className="text-center py-12">
-            <p className="text-slate-400 text-lg">No {assetTypeFilter.toLowerCase()} assets found</p>
-            <button
-              onClick={() => setAssetTypeFilter('ALL')}
-              className="mt-4 text-indigo-400 hover:text-indigo-300 text-sm"
-            >
-              Show all assets
-            </button>
-          </div>
-        )}
-        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredAssets.map(asset => (
+          {assets.map(asset => (
             <AssetCard 
               key={asset.id} 
               asset={asset} 
