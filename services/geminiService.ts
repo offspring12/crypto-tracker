@@ -299,48 +299,96 @@ export const fetchStockPrice = async (ticker: string): Promise<PriceResult> => {
 };
 
 export const fetchTokenPriceFromDex = async (contractAddress: string): Promise<PriceResult> => {
+  console.log('🚀 fetchTokenPriceFromDex called with:', contractAddress);
+  console.log('📏 Contract address length:', contractAddress.length);
+  
   const normalizedAddress = contractAddress.toLowerCase();
+  console.log('🔄 Normalized to:', normalizedAddress);
   
   try {
-    const url = `https://api.dexscreener.com/latest/dex/tokens/${normalizedAddress}`;
-    const res = await fetch(url);
+    // Use CORS proxy for browser compatibility
+    const corsProxy = 'https://api.allorigins.win/raw?url=';
+    const dexUrl = `https://api.dexscreener.com/latest/dex/tokens/${normalizedAddress}`;
+    const url = corsProxy + encodeURIComponent(dexUrl);
     
-    if (!res.ok) throw new Error(`DEXScreener API failed`);
+    console.log('📡 Fetching from DEXScreener (via CORS proxy)');
+    console.log('📡 Original URL:', dexUrl);
+    console.log('📡 Proxied URL:', url);
+    
+    const res = await fetch(url);
+    console.log('📥 DEXScreener response status:', res.status, res.ok);
+    
+    if (!res.ok) throw new Error(`DEXScreener API failed with status ${res.status}`);
     
     const data = await res.json();
-    if (!data.pairs || data.pairs.length === 0) throw new Error('No trading pairs found');
+    console.log('📊 DEXScreener raw response:', data);
+    
+    if (!data.pairs || data.pairs.length === 0) {
+      console.error('❌ No pairs found in response');
+      throw new Error('No trading pairs found');
+    }
+    
+    console.log(`📊 Found ${data.pairs.length} pairs total`);
     
     const sortedPairs = data.pairs
-      .filter((pair: any) => pair.priceUsd && parseFloat(pair.priceUsd) > 0)
+      .filter((pair: any) => {
+        const hasPrice = pair.priceUsd && parseFloat(pair.priceUsd) > 0;
+        console.log(`  Checking pair: ${pair.baseToken?.symbol} - Price: $${pair.priceUsd}, Valid: ${hasPrice}`);
+        return hasPrice;
+      })
       .sort((a: any, b: any) => parseFloat(b.liquidity?.usd || 0) - parseFloat(a.liquidity?.usd || 0));
     
-    if (sortedPairs.length === 0) throw new Error('No valid trading pairs');
+    console.log(`✅ ${sortedPairs.length} valid pairs after filtering`);
+    
+    if (sortedPairs.length === 0) {
+      console.error('❌ No valid pairs after filtering');
+      throw new Error('No valid trading pairs');
+    }
     
     const bestPair = sortedPairs[0];
-    const price = parseFloat(bestPair.priceUsd);
+    console.log('🎯 Selected best pair:', {
+      symbol: bestPair.baseToken?.symbol,
+      dex: bestPair.dexId,
+      chain: bestPair.chainId,
+      priceUsd: bestPair.priceUsd,
+      liquidity: bestPair.liquidity?.usd
+    });
     
-    if (isNaN(price) || price <= 0) throw new Error('Invalid price data');
+    const price = parseFloat(bestPair.priceUsd);
+    console.log('💰 Parsed price:', price);
+    
+    if (isNaN(price) || price <= 0) {
+      console.error('❌ Invalid price:', price);
+      throw new Error('Invalid price data');
+    }
     
     const tokenName = bestPair.baseToken?.name || 'Unknown Token';
     const tokenSymbol = bestPair.baseToken?.symbol || contractAddress.slice(0, 8);
+    
+    console.log('🏷️ Token info:', { name: tokenName, symbol: tokenSymbol, price });
     
     savePriceSnapshot(contractAddress, price);
     
     const liquidityUsdFormatted = (parseFloat(bestPair.liquidity?.usd || 0) / 1000000).toFixed(2);
     
-    return {
+    const result = {
       price,
       name: tokenName,
       symbol: tokenSymbol,
-      assetType: 'CRYPTO',
-      currency: 'USD',
+      assetType: 'CRYPTO' as const,
+      currency: 'USD' as const,
       sources: [{
         title: `${bestPair.dexId} (${bestPair.chainId}) - Liq: $${liquidityUsdFormatted}M`,
         url: bestPair.url || `https://dexscreener.com/${bestPair.chainId}/${bestPair.pairAddress}`
       }],
       rawText: `${tokenName} (${tokenSymbol}) - $${price}`
     };
+    
+    console.log('✅ fetchTokenPriceFromDex SUCCESS:', result);
+    return result;
+    
   } catch (error: any) {
+    console.error('❌ fetchTokenPriceFromDex ERROR:', error);
     throw new Error(error.message || "Failed to fetch from DEXScreener");
   }
 };
