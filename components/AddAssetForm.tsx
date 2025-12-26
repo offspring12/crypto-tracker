@@ -76,7 +76,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onAdd, isGlobalLoadi
           </div>
           <div className="flex-1 w-full">
             <label htmlFor="totalPaid" className="block text-xs font-medium text-slate-400 mb-1">
-              Total Paid (USD)
+              Total Paid
             </label>
             <div className="relative">
               <span className="absolute left-3 top-2.5 text-slate-500">

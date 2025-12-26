@@ -153,14 +153,30 @@ const saveHistoricalData = (ticker: string, historyData: [number, number][]) => 
 };
 
 export const fetchStockPrice = async (ticker: string): Promise<PriceResult> => {
+  console.log('📈 fetchStockPrice called with:', ticker);
+  
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`;
-    const response = await fetch(url);
+    // Try Yahoo Finance with CORS proxy
+    const corsProxy = 'https://api.allorigins.win/raw?url=';
+    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+    const url = corsProxy + encodeURIComponent(yahooUrl);
     
-    if (!response.ok) throw new Error(`Yahoo Finance API failed`);
+    console.log('📡 Fetching from Yahoo Finance (via CORS proxy):', ticker);
+    
+    const response = await fetch(url);
+    console.log('📥 Yahoo Finance response status:', response.status, response.ok);
+    
+    if (!response.ok) {
+      throw new Error(`Yahoo Finance returned status ${response.status}`);
+    }
     
     const data = await response.json();
-    if (!data.chart?.result?.[0]?.meta) throw new Error('Invalid response');
+    console.log('📊 Yahoo Finance raw data:', data);
+    
+    if (!data.chart?.result?.[0]?.meta) {
+      console.error('❌ Invalid Yahoo Finance response structure');
+      throw new Error('Invalid Yahoo Finance response');
+    }
     
     const meta = data.chart.result[0].meta;
     const price = meta.regularMarketPrice;
@@ -168,30 +184,117 @@ export const fetchStockPrice = async (ticker: string): Promise<PriceResult> => {
     const symbol = meta.symbol || ticker;
     const name = meta.longName || meta.shortName || ticker;
     
-    if (!price || price <= 0) throw new Error('Invalid price data');
+    console.log('💰 Stock data extracted:', { ticker, price, currency, name, symbol });
+    
+    if (!price || price <= 0 || isNaN(price)) {
+      throw new Error('Invalid price from Yahoo Finance');
+    }
     
     const detected = detectAssetType(ticker);
+    console.log('🔍 Detected asset type:', detected);
     
     let priceInUSD = price;
+    let conversionNote = '';
+    
     if (currency === 'CHF' || detected.currency === 'CHF') {
+      console.log(`💱 Converting ${price} CHF to USD...`);
       priceInUSD = await convertCurrency(price, 'CHF');
+      conversionNote = ` (converted from ${price.toFixed(2)} CHF)`;
+      console.log(`✅ Converted: ${price} CHF → ${priceInUSD.toFixed(2)} USD`);
     } else if (currency === 'EUR' || detected.currency === 'EUR') {
+      console.log(`💱 Converting ${price} EUR to USD...`);
       priceInUSD = await convertCurrency(price, 'EUR');
+      conversionNote = ` (converted from ${price.toFixed(2)} EUR)`;
+      console.log(`✅ Converted: ${price} EUR → ${priceInUSD.toFixed(2)} USD`);
     }
     
     savePriceSnapshot(ticker, priceInUSD);
     
-    return {
+    const result = {
       price: priceInUSD,
       name,
       symbol,
-      assetType: 'STOCK',
+      assetType: 'STOCK' as const,
       currency: detected.currency,
-      sources: [{ title: `Yahoo Finance (${currency})`, url: `https://finance.yahoo.com/quote/${ticker}` }],
-      rawText: `${name} - $${priceInUSD.toFixed(2)}`
+      sources: [{ 
+        title: `Yahoo Finance (${currency})${conversionNote}`, 
+        url: `https://finance.yahoo.com/quote/${ticker}` 
+      }],
+      rawText: `${name} - $${priceInUSD.toFixed(2)} from ${currency}${conversionNote}`
     };
+    
+    console.log('✅ fetchStockPrice SUCCESS:', result);
+    return result;
+    
   } catch (error: any) {
-    throw new Error(error.message || 'Failed to fetch stock price');
+    console.error('❌ Yahoo Finance failed, trying Gemini AI fallback...', error.message);
+    
+    // Fallback to Gemini AI for stock prices
+    try {
+      const apiKey = localStorage.getItem('gemini_api_key') || '';
+      if (!apiKey) {
+        throw new Error("API key not configured. Cannot fetch stock price.");
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      
+      const detected = detectAssetType(ticker);
+      const currencyInfo = detected.currency !== 'USD' ? ` in ${detected.currency}` : '';
+      
+      const prompt = `Find the current live stock price for ${ticker}${currencyInfo}. Return ONLY the numeric price value. No symbols, no explanations.`;
+
+      console.log('🤖 Asking Gemini AI:', prompt);
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash-exp',
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+        },
+      });
+
+      const text = response.text || "";
+      const cleanText = text.replace(/[$,]/g, '').trim();
+      const priceMatch = cleanText.match(/[\d]*[.]{0,1}[\d]+/);
+      
+      let price = priceMatch ? parseFloat(priceMatch[0]) : 0;
+      
+      if (price <= 0 || isNaN(price)) {
+        throw new Error("Could not extract valid price from AI response");
+      }
+      
+      console.log(`🤖 Gemini AI returned price: ${price} ${detected.currency}`);
+      
+      // Convert to USD if needed
+      let priceInUSD = price;
+      if (detected.currency === 'CHF') {
+        priceInUSD = await convertCurrency(price, 'CHF');
+        console.log(`✅ Converted: ${price} CHF → ${priceInUSD.toFixed(2)} USD`);
+      } else if (detected.currency === 'EUR') {
+        priceInUSD = await convertCurrency(price, 'EUR');
+        console.log(`✅ Converted: ${price} EUR → ${priceInUSD.toFixed(2)} USD`);
+      }
+      
+      savePriceSnapshot(ticker, priceInUSD);
+      
+      const sources: SourceLink[] = (response.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
+        .filter(c => c.web && c.web.uri)
+        .map(c => ({ title: c.web.title || 'Source', url: c.web.uri }));
+
+      return { 
+        price: priceInUSD, 
+        sources, 
+        rawText: text,
+        assetType: 'STOCK',
+        currency: detected.currency,
+        name: ticker,
+        symbol: ticker
+      };
+      
+    } catch (aiError: any) {
+      console.error('❌ Gemini AI also failed:', aiError.message);
+      throw new Error(`Failed to fetch stock price: ${aiError.message}`);
+    }
   }
 };
 
