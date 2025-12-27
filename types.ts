@@ -13,7 +13,7 @@ export type TransactionTag =
   | 'Research' 
   | string; // Allow custom tags
 
-export type AssetType = 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | 'ETF' | 'CASH';
+export type AssetType = 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | 'STOCK' | 'ETF' | 'CASH';
 
 export interface Transaction {
   id: string;
@@ -43,7 +43,7 @@ export interface Asset {
   priceHistory?: number[][];
   targetAllocation?: number;
   assetType?: AssetType;
-  currency?: 'USD' | 'CHF';
+  currency?: 'USD' | 'CHF' | 'EUR';
 }
 
 export interface HistorySnapshot {

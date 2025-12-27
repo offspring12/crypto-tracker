@@ -13,7 +13,7 @@ interface AssetCardProps {
   onEditTransaction: (assetId: string, txId: string, updates: { quantity?: number; pricePerCoin?: number; date?: string; tag?: TransactionTag }) => void;
 }
 
-const TAG_COLORS: Record<TransactionTag, string> = {
+const TAG_COLORS: Record<string, string> = {
   DCA: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
   FOMO: 'bg-red-500/20 text-red-300 border-red-500/30',
   Strategic: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
@@ -24,8 +24,9 @@ const TAG_COLORS: Record<TransactionTag, string> = {
   Custom: 'bg-slate-500/20 text-slate-300 border-slate-500/30'
 };
 
-const ASSET_TYPE_CONFIG = {
+const ASSET_TYPE_CONFIG: Record<string, { emoji: string; label: string; color: string }> = {
   CRYPTO: { emoji: '🪙', label: 'Crypto', color: 'border-purple-500/50 bg-purple-500/10 text-purple-300' },
+  STOCK: { emoji: '📈', label: 'Stock', color: 'border-blue-500/50 bg-blue-500/10 text-blue-300' },
   STOCK_US: { emoji: '📈', label: 'US Stock', color: 'border-blue-500/50 bg-blue-500/10 text-blue-300' },
   STOCK_CH: { emoji: '🇨🇭', label: 'Swiss Stock', color: 'border-red-500/50 bg-red-500/10 text-red-300' },
   ETF: { emoji: '📊', label: 'ETF', color: 'border-teal-500/50 bg-teal-500/10 text-teal-300' },
@@ -307,7 +308,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
                           {txPnL >= 0 ? '+' : ''}{currencyFmt.format(txPnL)}
                         </td>
                         <td className="p-2">
-                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium border ${TAG_COLORS[isCustomTag ? 'Custom' : txTag]}`}>
+                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium border ${TAG_COLORS[isCustomTag ? 'Custom' : txTag] || TAG_COLORS['Custom']}`}>
                             {displayTag}
                           </span>
                         </td>
