@@ -23,6 +23,25 @@ interface ChartDataPoint {
   costStack: Record<string, number>;
 }
 
+// Exchange rates for currency conversion (update these periodically or fetch from API)
+const EXCHANGE_RATES: Record<string, number> = {
+  'USD': 1.00,
+  'CHF': 0.92,  // 1 USD = 0.92 CHF (so 1 CHF = 1.087 USD)
+  'EUR': 0.93,  // 1 USD = 0.93 EUR (so 1 EUR = 1.075 USD)
+  'GBP': 0.79,  // 1 USD = 0.79 GBP (so 1 GBP = 1.266 USD)
+};
+
+// Convert any currency to display currency (default USD)
+const convertToDisplayCurrency = (value: number, fromCurrency: string, toCurrency: string = 'USD'): number => {
+  if (fromCurrency === toCurrency) return value;
+  
+  // Convert from source currency to USD
+  const valueInUSD = value / EXCHANGE_RATES[fromCurrency];
+  
+  // Convert from USD to target currency
+  return valueInUSD * EXCHANGE_RATES[toCurrency];
+};
+
 export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll, isGlobalLoading }) => {
   const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
   const [customStart, setCustomStart] = useState('');
@@ -30,19 +49,24 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
   const [hoverData, setHoverData] = useState<{ x: number, y: number, data: ChartDataPoint } | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [showAllAssets, setShowAllAssets] = useState(false);
+  const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'CHF' | 'EUR'>('USD');
 
+  // P4 CHANGE: Convert total value to selected currency
+  const convertedTotalValue = convertToDisplayCurrency(summary.totalValue, 'USD', displayCurrency);
   const formattedTotal = new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency: displayCurrency,
     maximumFractionDigits: 0
-  }).format(summary.totalValue);
+  }).format(convertedTotalValue);
 
+  // P4 CHANGE: Convert P&L to selected currency
+  const convertedPnL = convertToDisplayCurrency(summary.totalPnL, 'USD', displayCurrency);
   const formattedPnL = new Intl.NumberFormat('en-US', {
      style: 'currency',
-     currency: 'USD',
+     currency: displayCurrency,
      maximumFractionDigits: 0,
      signDisplay: "always"
-  }).format(summary.totalPnL);
+  }).format(convertedPnL);
   
   const formattedPnLPct = new Intl.NumberFormat('en-US', {
     style: 'percent',
@@ -120,7 +144,9 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                 return;
             }
 
-            costStack[asset.id] = costAtTime;
+            // Convert cost to USD for aggregation
+            const costInUSD = convertToDisplayCurrency(costAtTime, asset.currency || 'USD');
+            costStack[asset.id] = costInUSD;
 
             // B. Find Price at time t - SIMPLIFIED LOGIC
             let estimatedPrice = asset.currentPrice;
@@ -173,10 +199,13 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                 }
             }
 
-            const val = qtyAtTime * estimatedPrice;
-            stack[asset.id] = val;
-            totalVal += val;
-            totalCost += costAtTime;
+            const valInNativeCurrency = qtyAtTime * estimatedPrice;
+            // Convert to USD for chart aggregation
+            const valInUSD = convertToDisplayCurrency(valInNativeCurrency, asset.currency || 'USD');
+            
+            stack[asset.id] = valInUSD;
+            totalVal += valInUSD;
+            totalCost += costInUSD;
         });
 
         generatedData.push({
@@ -271,16 +300,17 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
     });
 
     const yLabels = [0, 0.5, 1].map(p => {
-       const val = computedMaxY * (1 - p);
+       const valUSD = computedMaxY * (1 - p);
+       const valConverted = convertToDisplayCurrency(valUSD, 'USD', displayCurrency);
        return {
           y: p * 100,
-          text: new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val)
+          text: new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(valConverted)
        };
     });
 
     return { Chart: FinalChart, xAxisLabels: xLabels, yAxisLabels: yLabels, chartData: generatedData, maxY: computedMaxY };
 
-  }, [assets, timeRange, customStart, customEnd]);
+  }, [assets, timeRange, customStart, customEnd, displayCurrency]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     if (!chartContainerRef.current || chartData.length === 0) return;
@@ -315,7 +345,12 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
     if (summary.totalValue === 0) return { gradient: `conic-gradient(#334155 0% 100%)`, sortedAssets: [] };
     
     const sorted = [...assets]
-      .map(asset => ({ ...asset, value: asset.quantity * asset.currentPrice }))
+      .map(asset => {
+        // Convert asset value to USD for comparison
+        const valueInNativeCurrency = asset.quantity * asset.currentPrice;
+        const valueInUSD = convertToDisplayCurrency(valueInNativeCurrency, asset.currency || 'USD');
+        return { ...asset, value: valueInUSD };
+      })
       .sort((a, b) => b.value - a.value);
 
     let cumulative = 0;
@@ -341,9 +376,19 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
         <div className="col-span-1 md:col-span-4 bg-gradient-to-br from-indigo-600 to-indigo-900 rounded-xl p-6 shadow-lg text-white flex flex-col justify-between min-h-[180px]">
             <div>
               <div className="flex items-center justify-between mb-4">
+                {/* P4 CHANGE: Add currency selector dropdown */}
                 <div className="flex items-center gap-2 text-indigo-200">
                     <TrendingUp size={20} />
                     <span className="text-sm font-medium">Net Worth</span>
+                    <select
+                      value={displayCurrency}
+                      onChange={(e) => setDisplayCurrency(e.target.value as 'USD' | 'CHF' | 'EUR')}
+                      className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-white/40 cursor-pointer"
+                    >
+                      <option value="USD">USD</option>
+                      <option value="CHF">CHF</option>
+                      <option value="EUR">EUR</option>
+                    </select>
                 </div>
                 <button 
                     onClick={onRefreshAll} 
@@ -380,7 +425,7 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
 
             <div className="flex-1 w-full">
                  {/* Dynamic layout: 1 column for ≤3 assets, 2 columns for 4+ assets */}
-                 <div className={`grid gap-x-8 gap-y-2 ${(showAllAssets ? pieChartData.sortedAssets : pieChartData.sortedAssets.slice(0, 6)).length <= 3 ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'}`}>
+                 <div className={`grid gap-x-8 gap-y-2 ${pieChartData.sortedAssets.slice(0, 6).length <= 3 ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'}`}>
                     {/* Column headers - repeated for each column in 2-col layout */}
                     {pieChartData.sortedAssets.slice(0, 6).length <= 3 ? (
                         <div className="text-xs font-medium text-slate-400 mb-1 border-b border-slate-700 pb-2 grid grid-cols-4 gap-4">
@@ -406,7 +451,7 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                         </>
                     )}
                     
-                    {(showAllAssets ? pieChartData.sortedAssets : pieChartData.sortedAssets.slice(0, 6)).map((asset, index) => {
+                    {pieChartData.sortedAssets.slice(0, 6).map((asset, index) => {
                         const currentPct = (asset.value / summary.totalValue) * 100;
                         const target = asset.targetAllocation || 0;
                         const deviation = target > 0 ? currentPct - target : 0;
@@ -416,7 +461,12 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                             <div key={asset.id} className="grid grid-cols-4 gap-4 items-center text-xs py-1">
                                  <div className="flex items-center gap-2 col-span-1 min-w-0">
                                     <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: CHART_COLORS[index % CHART_COLORS.length]}}></div>
-                                    <span className="text-slate-200 font-medium truncate">{asset.name || asset.ticker}</span>
+                                    <span className="text-slate-200 font-medium truncate">
+                                      {asset.name || asset.ticker}
+                                      {asset.currency && asset.currency !== 'USD' && (
+                                        <span className="ml-1 text-[9px] text-amber-400">({asset.currency})</span>
+                                      )}
+                                    </span>
                                  </div>
                                  <div className="text-center">
                                     <span className="text-slate-300 font-medium">{currentPct.toFixed(1)}%</span>
@@ -446,28 +496,14 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                         );
                     })}
                  </div>
-                 {/* Show All Button - Only display if more than 6 assets */}
-                 {pieChartData.sortedAssets.length > 6 && (
-                   <div className="mt-3 text-center">
-                     <button
-                       onClick={() => setShowAllAssets(!showAllAssets)}
-                       className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition-colors flex items-center gap-1 mx-auto"
-                     >
-                       {showAllAssets ? (
-                         <>Show less ▲</>
-                       ) : (
-                         <>Show {pieChartData.sortedAssets.length - 6} more ▼</>
-                       )}
-                     </button>
-                   </div>
-                 )}
             </div>
         </div>
       </div>
 
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
           <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
-              <div className="text-sm font-medium text-slate-300">Portfolio History</div>
+              {/* P4 CHANGE: Show selected currency in title */}
+              <div className="text-sm font-medium text-slate-300">Portfolio History ({displayCurrency})</div>
               
               <div className="flex items-center gap-2 flex-wrap justify-end">
                 {timeRange === 'CUSTOM' && (
@@ -528,9 +564,14 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                          
                          <div className="grid grid-cols-2 gap-x-4 mb-3 border-b border-slate-700/50 pb-2">
                             <div>
-                                <span className="text-[10px] text-slate-400 uppercase">Value</span>
+                                {/* P4 CHANGE: Show selected currency in tooltip */}
+                                <span className="text-[10px] text-slate-400 uppercase">Value ({displayCurrency})</span>
                                 <div className="text-sm font-bold text-white">
-                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(hoverData.data.marketValue || 0)}
+                                    {new Intl.NumberFormat('en-US', { 
+                                      style: 'currency', 
+                                      currency: displayCurrency, 
+                                      maximumFractionDigits: 0 
+                                    }).format(convertToDisplayCurrency(hoverData.data.marketValue || 0, 'USD', displayCurrency))}
                                 </div>
                             </div>
                             <div className="text-right">
@@ -542,7 +583,7 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                          </div>
 
                          <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Holding Breakdown</div>
-                         <div className={`space-y-1.5 ${assets.length > 6 ? 'max-h-[300px] overflow-y-auto' : 'max-h-[400px]'} custom-scrollbar`}>
+                         <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
                             {assets
                                 .map((a, i) => {
                                     const val = hoverData.data.stack[a.id] || 0;
@@ -551,7 +592,8 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                                     const plPct = cost > 0 ? (pl / cost) * 100 : 0;
                                     
                                     return { 
-                                        ticker: a.name || a.ticker, 
+                                        ticker: a.name || a.ticker,
+                                        currency: a.currency,
                                         val,
                                         pl,
                                         plPct,
@@ -564,10 +606,20 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                                     <div key={item.ticker} className="grid grid-cols-3 items-center text-xs">
                                         <div className="flex items-center gap-1.5 col-span-1">
                                             <div className="w-2 h-2 rounded-full" style={{ background: item.color }} />
-                                            <span className="text-slate-300 font-medium">{item.ticker}</span>
+                                            <span className="text-slate-300 font-medium">
+                                              {item.ticker}
+                                              {item.currency && item.currency !== 'USD' && (
+                                                <span className="ml-1 text-[9px] text-amber-400">({item.currency})</span>
+                                              )}
+                                            </span>
                                         </div>
                                         <div className="text-right text-slate-400 col-span-1">
-                                            {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact' }).format(item.val)}
+                                            {/* P4 CHANGE: Convert tooltip breakdown values to selected currency */}
+                                            {new Intl.NumberFormat('en-US', { 
+                                              style: 'currency', 
+                                              currency: displayCurrency, 
+                                              notation: 'compact' 
+                                            }).format(convertToDisplayCurrency(item.val, 'USD', displayCurrency))}
                                         </div>
                                         <div className={`text-right col-span-1 ${item.pl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                             {item.pl >= 0 ? '+' : ''}{item.plPct.toFixed(1)}%
