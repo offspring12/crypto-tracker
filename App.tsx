@@ -272,7 +272,7 @@ const App: React.FC = () => {
         transactions: [newTx], 
         avgBuyPrice: pricePerCoin, 
         totalCostBasis: totalCost,
-        assetType: 'CRYPTO', // Default to CRYPTO for now (P0.3 will add auto-detection)
+        assetType: undefined, // Will be auto-detected by API
         currency: currency // Store the currency
       };
       
@@ -290,7 +290,8 @@ const App: React.FC = () => {
             currentPrice: result.price, 
             sources: result.sources, 
             isUpdating: false,
-            name: result.name || result.symbol || a.name
+            name: result.name || result.symbol || a.name,
+            assetType: result.assetType || 'CRYPTO' // Auto-detect from API
           } : a)
         }));
         
