@@ -3,6 +3,21 @@ export interface SourceLink {
   url: string;
 }
 
+export type TransactionTag = 
+  | 'DCA' 
+  | 'FOMO' 
+  | 'Strategic' 
+  | 'Rebalance' 
+  | 'Emergency' 
+  | 'Profit-Taking' 
+  | 'Research' 
+  | string; // Allow custom tags
+
+export type AssetType = 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | 'ETF' | 'CASH';
+
+// Supported currencies
+export type Currency = 'USD' | 'CHF' | 'EUR' | 'GBP' | 'JPY' | 'CAD' | 'AUD';
+
 export interface Transaction {
   id: string;
   type: 'BUY' | 'SELL';
@@ -10,7 +25,9 @@ export interface Transaction {
   pricePerCoin: number;
   date: string;
   totalCost: number;
-  tag?: string;
+  tag?: TransactionTag;
+  lastEdited?: string;
+  createdAt?: string;
 }
 
 export interface Asset {
@@ -29,7 +46,8 @@ export interface Asset {
   coinGeckoId?: string;
   priceHistory?: number[][];
   targetAllocation?: number;
-  currency?: string; // NEW: Currency for this asset (USD, CHF, EUR, etc.)
+  assetType?: AssetType;
+  currency?: Currency; // Currency for this asset's prices
 }
 
 export interface HistorySnapshot {
@@ -45,7 +63,7 @@ export interface Portfolio {
   assets: Asset[];
   history: HistorySnapshot[];
   settings: {
-    displayCurrency?: string; // NEW: Portfolio display currency (default: USD)
+    displayCurrency?: Currency; // Optional: portfolio-level display currency
   };
   createdAt: string;
 }

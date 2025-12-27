@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot } from './types';
+import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot, TransactionTag, Currency } from './types';
 import { fetchCryptoPrice, fetchAssetHistory, delay } from './services/geminiService';
+import { convertCurrency } from './services/currencyService';
 import { AssetCard } from './components/AssetCard';
 import { AddAssetForm } from './components/AddAssetForm';
 import { Summary } from './components/Summary';
@@ -20,20 +21,6 @@ const PORTFOLIO_COLORS = [
   '#14b8a6', // Teal
 ];
 
-// Exchange rates for currency conversion (should match Summary.tsx)
-const EXCHANGE_RATES: Record<string, number> = {
-  'USD': 1.00,
-  'CHF': 0.92,  // 1 USD = 0.92 CHF
-  'EUR': 0.93,  // 1 USD = 0.93 EUR
-  'GBP': 0.79,  // 1 USD = 0.79 GBP
-};
-
-// Convert any currency to USD for aggregation
-const convertToUSD = (value: number, fromCurrency: string): number => {
-  if (fromCurrency === 'USD') return value;
-  return value / EXCHANGE_RATES[fromCurrency];
-};
-
 // Migration: Convert old structure to new portfolio structure
 const migrateToPortfolios = (): Portfolio[] => {
   const oldAssets = localStorage.getItem('portfolio_assets');
@@ -47,7 +34,7 @@ const migrateToPortfolios = (): Portfolio[] => {
       color: PORTFOLIO_COLORS[0],
       assets: [],
       history: [],
-      settings: { displayCurrency: 'USD' },
+      settings: {},
       createdAt: new Date().toISOString()
     }];
   }
@@ -62,7 +49,7 @@ const migrateToPortfolios = (): Portfolio[] => {
     color: PORTFOLIO_COLORS[0],
     assets,
     history,
-    settings: { displayCurrency: 'USD' },
+    settings: {},
     createdAt: new Date().toISOString()
   };
   
@@ -74,11 +61,29 @@ const migrateToPortfolios = (): Portfolio[] => {
   return [migratedPortfolio];
 };
 
+// Migrate transactions to include required tags and currency
+const migrateTransactionTags = (portfolios: Portfolio[]): Portfolio[] => {
+  return portfolios.map(portfolio => ({
+    ...portfolio,
+    assets: portfolio.assets.map(asset => ({
+      ...asset,
+      assetType: asset.assetType || 'CRYPTO', // Default to CRYPTO
+      currency: asset.currency || 'USD', // Default to USD
+      transactions: asset.transactions.map(tx => ({
+        ...tx,
+        tag: tx.tag || 'DCA', // Default untagged transactions to DCA
+        createdAt: tx.createdAt || tx.date || new Date().toISOString() // Use transaction date as createdAt if missing
+      }))
+    }))
+  }));
+};
+
 const App: React.FC = () => {
   const [portfolios, setPortfolios] = useState<Portfolio[]>(() => {
     const saved = localStorage.getItem('portfolios');
     if (saved) {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      return migrateTransactionTags(parsed); // Migrate old data
     }
     // Migration or first load
     return migrateToPortfolios();
@@ -100,6 +105,52 @@ const App: React.FC = () => {
   const assets = activePortfolio?.assets || [];
   const history = activePortfolio?.history || [];
 
+  // Calculate summary with USD conversion
+  const [summary, setSummary] = useState<PortfolioSummary>({
+    totalValue: 0,
+    totalCostBasis: 0,
+    totalPnL: 0,
+    totalPnLPercent: 0,
+    assetCount: 0,
+    lastGlobalUpdate: null
+  });
+
+  useEffect(() => {
+    const calculateSummary = async () => {
+      let totalValueUSD = 0;
+      let totalCostBasisUSD = 0;
+
+      for (const asset of assets) {
+        const assetValue = asset.quantity * asset.currentPrice;
+        const assetCurrency = asset.currency || 'USD';
+        
+        // Convert to USD for aggregation
+        const assetValueUSD = await convertCurrency(assetValue, assetCurrency, 'USD');
+        const costBasisUSD = await convertCurrency(asset.totalCostBasis, assetCurrency, 'USD');
+        
+        totalValueUSD += assetValueUSD;
+        totalCostBasisUSD += costBasisUSD;
+      }
+
+      const pnl = totalValueUSD - totalCostBasisUSD;
+      const pnlPercent = totalCostBasisUSD > 0 ? (pnl / totalCostBasisUSD) * 100 : 0;
+
+      setSummary({
+        totalValue: totalValueUSD,
+        totalCostBasis: totalCostBasisUSD,
+        totalPnL: pnl,
+        totalPnLPercent: pnlPercent,
+        assetCount: assets.length,
+        lastGlobalUpdate: assets.reduce((latest, a) => 
+          a.lastUpdated > latest ? a.lastUpdated : latest, 
+          assets[0]?.lastUpdated || null
+        )
+      });
+    };
+
+    calculateSummary();
+  }, [assets]);
+
   useEffect(() => {
     const checkApiKey = () => {
       const key = localStorage.getItem('gemini_api_key');
@@ -120,31 +171,6 @@ const App: React.FC = () => {
     localStorage.setItem('active_portfolio_id', activePortfolioId);
   }, [activePortfolioId]);
 
-  // Calculate portfolio summary with multi-currency support
-  const summary: PortfolioSummary = assets.reduce((acc, asset) => {
-    const assetValueInNativeCurrency = asset.quantity * asset.currentPrice;
-    const assetCostInNativeCurrency = asset.totalCostBasis;
-    
-    // Convert to USD for aggregation
-    const assetValueInUSD = convertToUSD(assetValueInNativeCurrency, asset.currency || 'USD');
-    const assetCostInUSD = convertToUSD(assetCostInNativeCurrency, asset.currency || 'USD');
-    
-    return {
-      totalValue: acc.totalValue + assetValueInUSD,
-      totalCostBasis: acc.totalCostBasis + assetCostInUSD,
-      totalPnL: acc.totalPnL + (assetValueInUSD - assetCostInUSD),
-      totalPnLPercent: 0,
-      assetCount: acc.assetCount + 1,
-      lastGlobalUpdate: asset.lastUpdated > (acc.lastGlobalUpdate || '') ? asset.lastUpdated : acc.lastGlobalUpdate
-    };
-  }, { 
-    totalValue: 0, totalCostBasis: 0, totalPnL: 0, totalPnLPercent: 0, assetCount: 0, lastGlobalUpdate: null as string | null 
-  });
-
-  if (summary.totalCostBasis > 0) {
-    summary.totalPnLPercent = (summary.totalPnL / summary.totalCostBasis) * 100;
-  }
-
   const updateActivePortfolio = (updater: (portfolio: Portfolio) => Portfolio) => {
     setPortfolios(prev => prev.map(p => 
       p.id === activePortfolioId ? updater(p) : p
@@ -152,24 +178,13 @@ const App: React.FC = () => {
   };
 
   const recordHistorySnapshot = useCallback((currentAssets: Asset[]) => {
-    // Convert all asset values to USD for history
-    const totalValue = currentAssets.reduce((sum, a) => {
-      const valueInNative = a.quantity * a.currentPrice;
-      return sum + convertToUSD(valueInNative, a.currency || 'USD');
-    }, 0);
-    
+    const totalValue = currentAssets.reduce((sum, a) => sum + (a.quantity * a.currentPrice), 0);
     if (totalValue === 0) return;
-    
     const snapshot: HistorySnapshot = {
       timestamp: Date.now(),
       totalValue,
-      assetValues: currentAssets.reduce((acc, a) => {
-        const valueInNative = a.quantity * a.currentPrice;
-        const valueInUSD = convertToUSD(valueInNative, a.currency || 'USD');
-        return { ...acc, [a.ticker]: valueInUSD };
-      }, {})
+      assetValues: currentAssets.reduce((acc, a) => ({ ...acc, [a.ticker]: a.quantity * a.currentPrice }), {})
     };
-    
     updateActivePortfolio(portfolio => ({
       ...portfolio,
       history: [...portfolio.history, snapshot].slice(-200) // Keep last 200
@@ -214,13 +229,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAddAsset = async (
-    ticker: string, 
-    quantity: number, 
-    pricePerCoin: number, 
-    date: string,
-    currency: string = 'USD'
-  ) => {
+  const handleAddAsset = async (ticker: string, quantity: number, pricePerCoin: number, date: string, currency: Currency = 'USD') => {
     const totalCost = quantity * pricePerCoin;
     const newTx: Transaction = { 
       id: Math.random().toString(36).substr(2, 9), 
@@ -228,7 +237,9 @@ const App: React.FC = () => {
       quantity, 
       pricePerCoin, 
       date, 
-      totalCost 
+      totalCost,
+      tag: 'DCA', // Default tag
+      createdAt: new Date().toISOString()
     };
     const existingAsset = assets.find(a => a.ticker === ticker);
     
@@ -248,6 +259,7 @@ const App: React.FC = () => {
       }));
     } else {
       const newId = Math.random().toString(36).substr(2, 9);
+      
       const tempAsset: Asset = { 
         id: newId, 
         ticker, 
@@ -260,7 +272,8 @@ const App: React.FC = () => {
         transactions: [newTx], 
         avgBuyPrice: pricePerCoin, 
         totalCostBasis: totalCost,
-        currency: currency // NEW: Store currency with asset
+        assetType: 'CRYPTO', // Default to CRYPTO for now (P0.3 will add auto-detection)
+        currency: currency // Store the currency
       };
       
       updateActivePortfolio(portfolio => ({
@@ -308,6 +321,41 @@ const App: React.FC = () => {
         const newCost = updatedTxs.reduce((sum, tx) => sum + tx.totalCost, 0);
         return { ...asset, transactions: updatedTxs, quantity: newQty, totalCostBasis: newCost, avgBuyPrice: newCost / newQty };
       }).filter(a => a !== null) as Asset[]
+    }));
+  };
+
+  const handleEditTransaction = (assetId: string, txId: string, updates: { quantity: number; pricePerCoin: number; date: string; tag: TransactionTag; customTag?: string }) => {
+    updateActivePortfolio(portfolio => ({
+      ...portfolio,
+      assets: portfolio.assets.map(asset => {
+        if (asset.id !== assetId) return asset;
+        
+        const updatedTransactions = asset.transactions.map(tx => {
+          if (tx.id !== txId) return tx;
+          
+          return {
+            ...tx,
+            quantity: updates.quantity,
+            pricePerCoin: updates.pricePerCoin,
+            date: updates.date,
+            totalCost: updates.quantity * updates.pricePerCoin,
+            tag: updates.tag,
+            customTag: updates.customTag,
+            lastEdited: new Date().toISOString()
+          };
+        });
+        
+        const newQty = updatedTransactions.reduce((sum, tx) => sum + tx.quantity, 0);
+        const newCost = updatedTransactions.reduce((sum, tx) => sum + tx.totalCost, 0);
+        
+        return {
+          ...asset,
+          transactions: updatedTransactions,
+          quantity: newQty,
+          totalCostBasis: newCost,
+          avgBuyPrice: newCost / newQty
+        };
+      })
     }));
   };
 
@@ -397,7 +445,7 @@ const App: React.FC = () => {
       color: PORTFOLIO_COLORS[portfolios.length % PORTFOLIO_COLORS.length],
       assets: [],
       history: [],
-      settings: { displayCurrency: 'USD' },
+      settings: {},
       createdAt: new Date().toISOString()
     };
     setPortfolios([...portfolios, newPortfolio]);
@@ -552,6 +600,7 @@ const App: React.FC = () => {
               asset={asset} 
               totalPortfolioValue={summary.totalValue} 
               onRemoveTransaction={handleRemoveTransaction} 
+              onEditTransaction={handleEditTransaction}
               onRefresh={handleRefreshAsset} 
               onRemove={() => updateActivePortfolio(portfolio => ({
                 ...portfolio,

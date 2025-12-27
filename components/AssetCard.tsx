@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Asset } from '../types';
-import { Trash2, RefreshCw, ChevronDown, ChevronUp, AlertCircle, History, TrendingUp, TrendingDown, Signal, SignalLow, Target, AlertTriangle } from 'lucide-react';
+import { Asset, TransactionTag, Currency } from '../types';
+import { Trash2, RefreshCw, ChevronDown, ChevronUp, AlertCircle, History, TrendingUp, TrendingDown, Signal, SignalLow, Target, AlertTriangle, Edit2, Save, X } from 'lucide-react';
 
 interface AssetCardProps {
   asset: Asset;
@@ -10,16 +10,37 @@ interface AssetCardProps {
   onRefresh: (id: string) => void;
   onUpdate: (id: string, updates: Partial<Asset>) => void;
   onRetryHistory: (id: string) => void;
+  onEditTransaction: (assetId: string, txId: string, updates: { quantity?: number; pricePerCoin?: number; date?: string; tag?: TransactionTag }) => void;
 }
 
-export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue, onRemove, onRemoveTransaction, onRefresh, onUpdate }) => {
-  const [showDetails, setShowDetails] = useState(false);
+const TAG_COLORS: Record<TransactionTag, string> = {
+  DCA: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  FOMO: 'bg-red-500/20 text-red-300 border-red-500/30',
+  Strategic: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  Rebalance: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  Emergency: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  'Profit-Taking': 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+  Research: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+  Custom: 'bg-slate-500/20 text-slate-300 border-slate-500/30'
+};
 
-  // Dynamic currency formatting based on asset's currency
-  const assetCurrency = asset.currency || 'USD';
-  const currencyFmt = new Intl.NumberFormat('en-US', { 
-    style: 'currency', 
-    currency: assetCurrency 
+const ASSET_TYPE_CONFIG = {
+  CRYPTO: { emoji: '🪙', label: 'Crypto', color: 'border-purple-500/50 bg-purple-500/10 text-purple-300' },
+  STOCK_US: { emoji: '📈', label: 'US Stock', color: 'border-blue-500/50 bg-blue-500/10 text-blue-300' },
+  STOCK_CH: { emoji: '🇨🇭', label: 'Swiss Stock', color: 'border-red-500/50 bg-red-500/10 text-red-300' },
+  ETF: { emoji: '📊', label: 'ETF', color: 'border-teal-500/50 bg-teal-500/10 text-teal-300' },
+  CASH: { emoji: '💵', label: 'Cash', color: 'border-gray-500/50 bg-gray-500/10 text-gray-300' }
+};
+
+export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue, onRemove, onRemoveTransaction, onRefresh, onUpdate, onEditTransaction }) => {
+  const [showDetails, setShowDetails] = useState(false);
+  const [editingTxId, setEditingTxId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<{ quantity: string; pricePerCoin: string; date: string; tag: TransactionTag; customTag: string }>({
+    quantity: '',
+    pricePerCoin: '',
+    date: '',
+    tag: 'DCA',
+    customTag: ''
   });
 
   const currentTotalValue = asset.quantity * asset.currentPrice;
@@ -35,22 +56,71 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
   const deviation = currentAllocation - targetAllocation;
   const isDeviationSignificant = targetAllocation > 0 && Math.abs(deviation) >= 5;
 
+  // Use asset's native currency for display
+  const assetCurrency: Currency = asset.currency || 'USD';
+  const currencyFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: assetCurrency });
   const pctFmt = new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 2, signDisplay: "always" });
 
   const isContractAddress = asset.ticker.startsWith('0x') && asset.ticker.length >= 40;
+  
+  const assetTypeConfig = ASSET_TYPE_CONFIG[asset.assetType || 'CRYPTO'];
+
+  const handleStartEdit = (tx: any) => {
+    setEditingTxId(tx.id);
+    const isCustomTag = tx.tag && !['DCA', 'FOMO', 'Strategic', 'Rebalance', 'Emergency', 'Profit-Taking', 'Research'].includes(tx.tag);
+    setEditForm({
+      quantity: tx.quantity.toString(),
+      pricePerCoin: tx.pricePerCoin.toString(),
+      date: tx.date,
+      tag: isCustomTag ? 'Custom' : (tx.tag || 'DCA'),
+      customTag: isCustomTag ? tx.tag : ''
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingTxId(null);
+    setEditForm({ quantity: '', pricePerCoin: '', date: '', tag: 'DCA', customTag: '' });
+  };
+
+  const handleSaveEdit = (txId: string) => {
+    const quantity = parseFloat(editForm.quantity);
+    const pricePerCoin = parseFloat(editForm.pricePerCoin);
+    
+    if (isNaN(quantity) || isNaN(pricePerCoin) || quantity <= 0 || pricePerCoin <= 0) {
+      alert('Please enter valid positive numbers');
+      return;
+    }
+
+    const finalTag = editForm.tag === 'Custom' ? editForm.customTag.trim() : editForm.tag;
+    
+    onEditTransaction(asset.id, txId, {
+      quantity,
+      pricePerCoin,
+      date: editForm.date,
+      tag: finalTag as TransactionTag
+    });
+    
+    handleCancelEdit();
+  };
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg relative overflow-hidden transition-all hover:border-slate-600">
+      {/* Asset Type Badge - Top Right */}
+      <div className={`absolute top-3 right-3 px-2 py-1 rounded-md border text-[10px] font-bold flex items-center gap-1 ${assetTypeConfig.color}`}>
+        <span>{assetTypeConfig.emoji}</span>
+        <span>{assetTypeConfig.label}</span>
+        {/* Currency Badge - Only show for non-USD */}
+        {asset.currency && asset.currency !== 'USD' && (
+          <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            {asset.currency}
+          </span>
+        )}
+      </div>
+
       <div className="flex justify-between items-start mb-2">
         <div>
           <h3 className="text-xl font-bold text-slate-100 uppercase flex items-center gap-2">
             {asset.name || asset.ticker}
-            {/* Currency Badge - only show for non-USD currencies */}
-            {asset.currency && asset.currency !== 'USD' && (
-              <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded font-bold border border-amber-500/30">
-                {asset.currency}
-              </span>
-            )}
             {asset.error && <AlertCircle size={16} className="text-red-500" />}
             {hasHistory ? <Signal size={16} className="text-emerald-500/80" /> : <SignalLow size={16} className="text-slate-600" />}
             {isDeviationSignificant && <AlertTriangle size={16} className={deviation > 0 ? 'text-amber-500' : 'text-blue-400'} />}
@@ -60,7 +130,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
           )}
           <p className="text-slate-400 text-sm font-mono">{asset.quantity.toLocaleString()} units</p>
         </div>
-        <div className="text-right">
+        <div className="text-right pr-24">
           <p className="text-2xl font-semibold text-slate-100">{currencyFmt.format(currentTotalValue)}</p>
           <div className={`flex items-center justify-end gap-1 text-sm font-medium ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
             {isProfit ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
@@ -122,35 +192,150 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
             <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-2 flex items-center gap-1">
               <History size={10} /> History
             </p>
-            <div className="max-h-48 overflow-y-auto custom-scrollbar bg-slate-900/30 rounded border border-slate-700/50">
+            <div className="max-h-96 overflow-y-auto custom-scrollbar bg-slate-900/30 rounded border border-slate-700/50">
               <table className="w-full text-left text-[11px]">
                 <thead className="bg-slate-800/50 text-slate-400 sticky top-0">
                   <tr>
                     <th className="p-2">Date</th>
                     <th className="p-2">Qty</th>
-                    <th className="p-2 text-right">Cost</th>
+                    <th className="p-2 text-right">Price</th>
+                    <th className="p-2 text-right">Total</th>
                     <th className="p-2 text-right">P&L</th>
-                    <th className="p-2 w-8"></th>
+                    <th className="p-2">Tag</th>
+                    <th className="p-2 w-16"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/50 text-slate-300">
                   {asset.transactions.map((tx) => {
                     const txPnL = (tx.quantity * asset.currentPrice) - tx.totalCost;
+                    const isEditing = editingTxId === tx.id;
+                    const txTag = tx.tag || 'DCA';
+                    const isCustomTag = !['DCA', 'FOMO', 'Strategic', 'Rebalance', 'Emergency', 'Profit-Taking', 'Research'].includes(txTag);
+                    const displayTag = isCustomTag ? txTag : txTag;
+
+                    if (isEditing) {
+                      const calculatedTotal = (parseFloat(editForm.quantity) || 0) * (parseFloat(editForm.pricePerCoin) || 0);
+                      
+                      return (
+                        <tr key={tx.id} className="bg-indigo-900/20">
+                          <td className="p-2">
+                            <input
+                              type="date"
+                              value={editForm.date}
+                              onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
+                              className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-[11px] text-white"
+                            />
+                          </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              step="any"
+                              value={editForm.quantity}
+                              onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                              className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-[11px] text-white font-mono"
+                            />
+                          </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              step="any"
+                              value={editForm.pricePerCoin}
+                              onChange={(e) => setEditForm({ ...editForm, pricePerCoin: e.target.value })}
+                              className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-[11px] text-white font-mono text-right"
+                            />
+                          </td>
+                          <td className="p-2 text-right font-mono text-slate-400">
+                            {currencyFmt.format(calculatedTotal)}
+                          </td>
+                          <td className="p-2"></td>
+                          <td className="p-2">
+                            <select
+                              value={editForm.tag}
+                              onChange={(e) => setEditForm({ ...editForm, tag: e.target.value as TransactionTag })}
+                              className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-[11px] text-white"
+                            >
+                              <option value="DCA">DCA</option>
+                              <option value="FOMO">FOMO</option>
+                              <option value="Strategic">Strategic</option>
+                              <option value="Rebalance">Rebalance</option>
+                              <option value="Emergency">Emergency</option>
+                              <option value="Profit-Taking">Profit-Taking</option>
+                              <option value="Research">Research</option>
+                              <option value="Custom">Custom</option>
+                            </select>
+                            {editForm.tag === 'Custom' && (
+                              <input
+                                type="text"
+                                value={editForm.customTag}
+                                onChange={(e) => setEditForm({ ...editForm, customTag: e.target.value.slice(0, 20) })}
+                                placeholder="Custom tag..."
+                                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-[11px] text-white mt-1"
+                              />
+                            )}
+                          </td>
+                          <td className="p-2">
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => handleSaveEdit(tx.id)}
+                                className="p-1 text-emerald-400 hover:bg-emerald-400/10 rounded transition-colors"
+                                title="Save"
+                              >
+                                <Save size={14} />
+                              </button>
+                              <button
+                                onClick={handleCancelEdit}
+                                className="p-1 text-slate-400 hover:bg-slate-700 rounded transition-colors"
+                                title="Cancel"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
                     return (
-                      <tr key={tx.id} className="hover:bg-white/5">
-                        <td className="p-2 text-slate-400">{tx.date}</td>
+                      <tr key={tx.id} className="hover:bg-white/5 group">
+                        <td className="p-2 text-slate-400">
+                          {tx.date}
+                          {tx.lastEdited && (
+                            <span 
+                              className="ml-1 text-[9px] text-indigo-400 cursor-help" 
+                              title={`Last edited: ${new Date(tx.lastEdited).toLocaleString()}`}
+                            >
+                              edited
+                            </span>
+                          )}
+                        </td>
                         <td className="p-2 font-mono">{tx.quantity.toLocaleString()}</td>
+                        <td className="p-2 text-right font-mono">{currencyFmt.format(tx.pricePerCoin)}</td>
                         <td className="p-2 text-right font-mono">{currencyFmt.format(tx.totalCost)}</td>
                         <td className={`p-2 text-right font-mono ${txPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {txPnL >= 0 ? '+' : ''}{currencyFmt.format(txPnL)}
                         </td>
-                        <td className="p-2 text-right">
-                          <button 
-                            onClick={() => onRemoveTransaction(asset.id, tx.id)} 
-                            className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-400/10"
-                          >
-                            <Trash2 size={12} />
-                          </button>
+                        <td className="p-2">
+                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium border ${TAG_COLORS[isCustomTag ? 'Custom' : txTag]}`}>
+                            {displayTag}
+                          </span>
+                        </td>
+                        <td className="p-2">
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => handleStartEdit(tx)}
+                              className="p-1 text-indigo-400 hover:bg-indigo-400/10 rounded transition-colors"
+                              title="Edit"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button 
+                              onClick={() => onRemoveTransaction(asset.id, tx.id)} 
+                              className="p-1 text-slate-500 hover:text-red-400 transition-colors hover:bg-red-400/10 rounded"
+                              title="Delete"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
