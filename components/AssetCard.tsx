@@ -117,8 +117,8 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
         )}
       </div>
 
-      <div className="flex justify-between items-start mb-2">
-        <div>
+      <div className="flex justify-between items-start mb-2 gap-4">
+        <div className="flex-shrink-0">
           <h3 className="text-xl font-bold text-slate-100 uppercase flex items-center gap-2">
             {asset.name || asset.ticker}
             {asset.error && <AlertCircle size={16} className="text-red-500" />}
@@ -130,7 +130,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
           )}
           <p className="text-slate-400 text-sm font-mono">{asset.quantity.toLocaleString()} units</p>
         </div>
-        <div className="text-right pr-24">
+        <div className="text-right flex-shrink-0 pr-2">
           <p className="text-2xl font-semibold text-slate-100">{currencyFmt.format(currentTotalValue)}</p>
           <div className={`flex items-center justify-end gap-1 text-sm font-medium ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
             {isProfit ? <TrendingUp size={14} /> : <TrendingDown size={14} />}

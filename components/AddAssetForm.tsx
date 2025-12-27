@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Plus, Loader2, Calendar, DollarSign, Coins } from 'lucide-react';
+import { Plus, Loader2, Calendar, DollarSign } from 'lucide-react';
+import { Currency } from '../types';
+import { SUPPORTED_CURRENCIES } from '../services/currencyService';
 
 interface AddAssetFormProps {
-  onAdd: (ticker: string, quantity: number, pricePerCoin: number, date: string, currency: string) => Promise<void>;
+  onAdd: (ticker: string, quantity: number, pricePerCoin: number, date: string, currency: Currency) => Promise<void>;
   isGlobalLoading: boolean;
 }
 
@@ -11,7 +13,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onAdd, isGlobalLoadi
   const [quantity, setQuantity] = useState('');
   const [totalPaid, setTotalPaid] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState<Currency>('USD');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,7 +35,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onAdd, isGlobalLoadi
       currency
     );
     
-    // Reset form but keep date as today and currency selection
+    // Reset form but keep date and currency
     setTicker('');
     setQuantity('');
     setTotalPaid('');
@@ -62,6 +64,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onAdd, isGlobalLoadi
                 setTicker(value.startsWith('0x') && value.length > 10 ? value : value.toUpperCase());
               }}
               placeholder="BTC or 0x"
+              title="Examples: BTC, ETH, AAPL, NESN.SW (Swiss), SAP.DE (German), 0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984"
               className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2.5 text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder-slate-600 uppercase"
               required
             />
@@ -105,29 +108,25 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onAdd, isGlobalLoadi
             <label htmlFor="currency" className="block text-xs font-medium text-slate-400 mb-1">
               Currency
             </label>
-            <div className="relative">
-              <span className="absolute left-3 top-2.5 text-slate-500">
-                <Coins size={16} />
-              </span>
-              <select
-                id="currency"
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-9 pr-4 py-2.5 text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none transition-all appearance-none cursor-pointer"
-              >
-                <option value="USD">USD 🇺🇸</option>
-                <option value="CHF">CHF 🇨🇭</option>
-                <option value="EUR">EUR 🇪🇺</option>
-                <option value="GBP">GBP 🇬🇧</option>
-              </select>
-            </div>
+            <select
+              id="currency"
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value as Currency)}
+              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2.5 text-slate-100 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+            >
+              {SUPPORTED_CURRENCIES.map(curr => (
+                <option key={curr.code} value={curr.code}>
+                  {curr.flag} {curr.code} - {curr.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="flex-1 w-full">
             <label htmlFor="date" className="block text-xs font-medium text-slate-400 mb-1">
               Date
             </label>
             <div className="relative">
-              <span className="absolute left-3 top-2.5 text-slate-500">
+               <span className="absolute left-3 top-2.5 text-slate-500">
                 <Calendar size={16} />
               </span>
               <input
