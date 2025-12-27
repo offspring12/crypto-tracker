@@ -192,103 +192,122 @@ export const fetchTokenPriceFromDex = async (contractAddress: string): Promise<P
   }
 };
 
-// FIXED: Fetch stock using Yahoo Finance (most reliable for names)
+// FIXED: Fetch stock price with CORS-friendly approach
 const fetchStockPrice = async (ticker: string, assetType: 'STOCK_US' | 'STOCK_CH'): Promise<PriceResult> => {
   console.log(`📈 Fetching stock: ${ticker} (${assetType})`);
   
+  // Try Alpha Vantage FIRST (more reliable, no CORS issues)
   try {
-    // Yahoo Finance API
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`;
+    const apiKey = 'EVGJOHH32QUQXK2X';
+    const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${apiKey}`;
+    
+    console.log('📡 Fetching from Alpha Vantage:', url);
     const res = await fetch(url);
     
     if (!res.ok) {
-      throw new Error(`Yahoo Finance returned status ${res.status}`);
+      throw new Error(`Alpha Vantage returned status ${res.status}`);
     }
     
     const data = await res.json();
+    console.log('📊 Alpha Vantage response:', data);
     
-    if (data.chart?.result?.[0]) {
-      const result = data.chart.result[0];
-      const price = result.meta?.regularMarketPrice;
+    if (data['Global Quote'] && data['Global Quote']['05. price']) {
+      const price = parseFloat(data['Global Quote']['05. price']);
       
-      // FIXED: Use longName from Yahoo, fallback to shortName, then ticker
-      let companyName = ticker; // Default to ticker
-      
-      if (result.meta?.longName) {
-        companyName = result.meta.longName;
-      } else if (result.meta?.shortName) {
-        companyName = result.meta.shortName;
+      if (!price || price <= 0) {
+        throw new Error('Invalid price from Alpha Vantage');
       }
       
-      console.log(`✅ Yahoo Finance result: ${companyName} = $${price}`);
+      // Try to get company name from symbol (Alpha Vantage doesn't provide it)
+      // We'll use ticker for now, can enhance later
+      const companyName = ticker;
       
-      if (price && price > 0) {
-        savePriceSnapshot(ticker, price);
-        
-        return {
-          price,
-          name: companyName, // This will be "Apple Inc." not "BASED"
-          symbol: ticker,
-          assetType,
-          sources: [{
-            title: 'Yahoo Finance',
-            url: `https://finance.yahoo.com/quote/${ticker}`
-          }],
-          rawText: `${companyName} (${ticker}) - $${price}`
-        };
-      }
+      savePriceSnapshot(ticker, price);
+      
+      console.log(`✅ Alpha Vantage SUCCESS: ${ticker} = $${price}`);
+      
+      return {
+        price,
+        name: companyName,
+        symbol: ticker,
+        assetType,
+        sources: [{
+          title: 'Alpha Vantage',
+          url: `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}`
+        }],
+        rawText: `${ticker} - $${price}`
+      };
+    } else if (data.Note) {
+      // API rate limit hit
+      console.error('❌ Alpha Vantage rate limit:', data.Note);
+      throw new Error('Alpha Vantage rate limit exceeded - please wait a minute');
+    } else {
+      throw new Error('Invalid Alpha Vantage response structure');
     }
+  } catch (avError: any) {
+    console.error('❌ Alpha Vantage failed:', avError);
     
-    throw new Error('Invalid Yahoo Finance response');
-  } catch (yahooError) {
-    console.warn('⚠️ Yahoo Finance failed, trying Alpha Vantage:', yahooError);
-    
-    // Fallback to Alpha Vantage
+    // Fallback to Yahoo Finance with CORS proxy
     try {
-      const apiKey = 'EVGJOHH32QUQXK2X';
-      const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${apiKey}`;
+      console.log('⚠️ Trying Yahoo Finance as fallback...');
       
-      const res = await fetch(url);
+      // CORS PROXY: Use allorigins.win to bypass CORS restrictions
+      const yahooUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}`;
+      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
+      
+      console.log('📡 Using CORS proxy for Yahoo Finance...');
+      const res = await fetch(proxyUrl);
       
       if (!res.ok) {
-        throw new Error(`Alpha Vantage returned status ${res.status}`);
+        throw new Error(`CORS proxy returned status ${res.status}`);
       }
       
-      const data = await res.json();
+      const proxyData = await res.json();
+      const data = JSON.parse(proxyData.contents);
       
-      if (data['Global Quote'] && data['Global Quote']['05. price']) {
-        const price = parseFloat(data['Global Quote']['05. price']);
+      if (data.chart?.result?.[0]) {
+        const result = data.chart.result[0];
+        const price = result.meta?.regularMarketPrice;
         
-        // FIXED: Alpha Vantage doesn't provide company names, so use ticker
-        const companyName = ticker; // Keep as ticker, better than "BASED"
+        let companyName = ticker;
         
-        savePriceSnapshot(ticker, price);
+        if (result.meta?.longName) {
+          companyName = result.meta.longName;
+        } else if (result.meta?.shortName) {
+          companyName = result.meta.shortName;
+        }
         
-        console.log(`✅ Alpha Vantage: ${ticker} = $${price}`);
-        
-        return {
-          price,
-          name: companyName,
-          symbol: ticker,
-          assetType,
-          sources: [{
-            title: 'Alpha Vantage',
-            url: `https://www.alphavantage.co`
-          }],
-          rawText: `${ticker} - $${price}`
-        };
+        if (price && price > 0) {
+          savePriceSnapshot(ticker, price);
+          
+          console.log(`✅ Yahoo Finance SUCCESS (via CORS proxy): ${companyName} = $${price}`);
+          
+          return {
+            price,
+            name: companyName,
+            symbol: ticker,
+            assetType,
+            sources: [{
+              title: 'Yahoo Finance',
+              url: `https://finance.yahoo.com/quote/${ticker}`
+            }],
+            rawText: `${companyName} (${ticker}) - $${price}`
+          };
+        }
       }
       
-      throw new Error('Invalid Alpha Vantage response');
-    } catch (avError) {
-      console.error('❌ Both Yahoo and Alpha Vantage failed:', avError);
-      throw new Error(`Failed to fetch stock price for ${ticker}`);
+      throw new Error('Invalid Yahoo Finance response');
+    } catch (yahooError: any) {
+      console.error('❌ Yahoo Finance also failed:', yahooError);
+      throw new Error(`Failed to fetch stock price: ${avError.message}. Please check ticker symbol.`);
     }
   }
 };
 
 export const fetchCryptoPrice = async (ticker: string): Promise<PriceResult> => {
-  console.log('🔵 fetchCryptoPrice:', ticker);
+  console.log('🔵 ========================================');
+  console.log('🔵 fetchCryptoPrice START:', ticker);
+  console.log('🔵 ========================================');
   
   // Contract addresses go to DEXScreener
   if (isContractAddress(ticker)) {
@@ -298,14 +317,18 @@ export const fetchCryptoPrice = async (ticker: string): Promise<PriceResult> => 
   
   // Auto-detect asset type
   const assetType = detectAssetType(ticker);
-  console.log(`🔍 Detected type: ${assetType}`);
+  console.log(`🔍 Auto-detected type: ${assetType} for ticker: ${ticker}`);
   
   // Stocks use Yahoo Finance / Alpha Vantage
   if (assetType === 'STOCK_US' || assetType === 'STOCK_CH') {
-    return fetchStockPrice(ticker, assetType);
+    console.log(`📈 Routing to stock API...`);
+    const result = await fetchStockPrice(ticker, assetType);
+    console.log('✅ Stock price result:', result);
+    return result;
   }
   
   // Crypto uses Gemini AI with grounding
+  console.log(`🪙 Routing to crypto API (Gemini AI)...`);
   try {
     const apiKey = localStorage.getItem('gemini_api_key') || '';
     
@@ -341,15 +364,19 @@ export const fetchCryptoPrice = async (ticker: string): Promise<PriceResult> => 
       .filter(c => c.web && c.web.uri)
       .map(c => ({ title: c.web.title || 'Source', url: c.web.uri }));
 
-    return { 
+    const result = { 
       price, 
       name: ticker, // Just use ticker for crypto
       symbol: ticker,
-      assetType: 'CRYPTO',
+      assetType: 'CRYPTO' as const,
       sources, 
       rawText: text 
     };
+    
+    console.log('✅ Crypto price result:', result);
+    return result;
   } catch (error: any) {
+    console.error('❌ Crypto fetch error:', error);
     throw new Error(error.message || "Failed to fetch crypto price");
   }
 };
