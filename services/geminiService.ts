@@ -123,87 +123,118 @@ const saveHistoricalData = (ticker: string, historyData: [number, number][]) => 
 const fetchYahooStock = async (ticker: string, assetType: 'STOCK_US' | 'STOCK_CH'): Promise<PriceResult> => {
   console.log(`📈 Fetching stock from Yahoo Finance: ${ticker} (${assetType})`);
   
-  try {
-    const yahooUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?range=1y&interval=1d`;
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
+  const yahooUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?range=1y&interval=1d`;
+  
+  // Try multiple CORS proxies (allorigins.win is often down)
+  const corsProxies = [
+    `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`,
+    `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`,
+    `https://cors-anywhere.herokuapp.com/${yahooUrl}`
+  ];
+  
+  for (let i = 0; i < corsProxies.length; i++) {
+    const proxyUrl = corsProxies[i];
+    const proxyName = proxyUrl.includes('corsproxy.io') ? 'corsproxy.io' : 
+                      proxyUrl.includes('allorigins') ? 'allorigins.win' : 
+                      'cors-anywhere';
     
-    console.log('📡 Using CORS proxy for Yahoo Finance...');
-    const res = await fetch(proxyUrl);
-    
-    if (!res.ok) {
-      throw new Error(`CORS proxy returned status ${res.status}`);
-    }
-    
-    const proxyData = await res.json();
-    const data = JSON.parse(proxyData.contents);
-    
-    if (!data.chart?.result?.[0]) {
-      throw new Error('Invalid Yahoo Finance response structure');
-    }
-    
-    const result = data.chart.result[0];
-    const price = result.meta?.regularMarketPrice;
-    
-    if (!price || price <= 0) {
-      throw new Error('Invalid price from Yahoo Finance');
-    }
-    
-    // Get company name
-    let companyName = ticker;
-    if (result.meta?.longName) {
-      companyName = result.meta.longName;
-    } else if (result.meta?.shortName) {
-      companyName = result.meta.shortName;
-    }
-    
-    console.log(`✅ Yahoo Finance SUCCESS: ${companyName} = $${price}`);
-    
-    // Save current price
-    savePriceSnapshot(ticker, price);
-    
-    // Extract historical data (timestamps and closes)
-    const timestamps = result.timestamp || [];
-    const closes = result.indicators?.quote?.[0]?.close || [];
-    
-    if (timestamps.length > 0 && closes.length > 0) {
-      const historyData: [number, number][] = [];
+    try {
+      console.log(`📡 Trying CORS proxy #${i + 1} (${proxyName})...`);
       
-      for (let i = 0; i < timestamps.length; i++) {
-        const timestamp = timestamps[i] * 1000; // Convert to milliseconds
-        const close = closes[i];
+      const res = await fetch(proxyUrl);
+      
+      if (!res.ok) {
+        console.warn(`⚠️ Proxy ${proxyName} returned status ${res.status}`);
+        continue; // Try next proxy
+      }
+      
+      let data;
+      
+      // allorigins.win wraps response in {contents: "..."}
+      if (proxyName === 'allorigins.win') {
+        const proxyData = await res.json();
+        data = JSON.parse(proxyData.contents);
+      } else {
+        // Other proxies return data directly
+        data = await res.json();
+      }
+      
+      if (!data.chart?.result?.[0]) {
+        console.warn(`⚠️ Invalid response structure from ${proxyName}`);
+        continue; // Try next proxy
+      }
+      
+      const result = data.chart.result[0];
+      const price = result.meta?.regularMarketPrice;
+      
+      if (!price || price <= 0) {
+        console.warn(`⚠️ Invalid price from ${proxyName}`);
+        continue; // Try next proxy
+      }
+      
+      // Get company name
+      let companyName = ticker;
+      if (result.meta?.longName) {
+        companyName = result.meta.longName;
+      } else if (result.meta?.shortName) {
+        companyName = result.meta.shortName;
+      }
+      
+      console.log(`✅ Yahoo Finance SUCCESS (via ${proxyName}): ${companyName} = $${price}`);
+      
+      // Save current price
+      savePriceSnapshot(ticker, price);
+      
+      // Extract historical data (timestamps and closes)
+      const timestamps = result.timestamp || [];
+      const closes = result.indicators?.quote?.[0]?.close || [];
+      
+      if (timestamps.length > 0 && closes.length > 0) {
+        const historyData: [number, number][] = [];
         
-        if (close && close > 0 && !isNaN(close)) {
-          historyData.push([timestamp, close]);
+        for (let i = 0; i < timestamps.length; i++) {
+          const timestamp = timestamps[i] * 1000; // Convert to milliseconds
+          const close = closes[i];
+          
+          if (close && close > 0 && !isNaN(close)) {
+            historyData.push([timestamp, close]);
+          }
+        }
+        
+        if (historyData.length > 0) {
+          console.log(`✅ Got ${historyData.length} days of history from Yahoo Finance`);
+          
+          const localSnapshots = loadPriceSnapshots(ticker);
+          const merged = mergeHistoryWithSnapshots(historyData, localSnapshots);
+          saveHistoricalData(ticker, merged);
+          
+          console.log(`💾 Saved ${merged.length} total historical data points`);
         }
       }
       
-      if (historyData.length > 0) {
-        console.log(`✅ Got ${historyData.length} days of history from Yahoo Finance`);
-        
-        const localSnapshots = loadPriceSnapshots(ticker);
-        const merged = mergeHistoryWithSnapshots(historyData, localSnapshots);
-        saveHistoricalData(ticker, merged);
-        
-        console.log(`💾 Saved ${merged.length} total historical data points`);
+      return {
+        price,
+        name: companyName,
+        symbol: ticker,
+        assetType,
+        sources: [{
+          title: 'Yahoo Finance',
+          url: `https://finance.yahoo.com/quote/${ticker}`
+        }],
+        rawText: `${companyName} (${ticker}) - $${price}`
+      };
+      
+    } catch (error: any) {
+      console.warn(`❌ Proxy ${proxyName} failed:`, error.message);
+      if (i === corsProxies.length - 1) {
+        // Last proxy failed, throw error
+        throw new Error(`All CORS proxies failed. Last error: ${error.message}`);
       }
+      // Otherwise continue to next proxy
     }
-    
-    return {
-      price,
-      name: companyName,
-      symbol: ticker,
-      assetType,
-      sources: [{
-        title: 'Yahoo Finance',
-        url: `https://finance.yahoo.com/quote/${ticker}`
-      }],
-      rawText: `${companyName} (${ticker}) - $${price}`
-    };
-    
-  } catch (error: any) {
-    console.error('❌ Yahoo Finance failed:', error);
-    throw new Error(`Failed to fetch from Yahoo Finance: ${error.message}`);
   }
+  
+  throw new Error('All CORS proxies failed to fetch Yahoo Finance data');
 };
 
 // Fetch DEX token price
