@@ -15,32 +15,50 @@ interface PriceResult {
 const isContractAddress = (input: string): boolean => {
   const lowerInput = input.toLowerCase();
   const result = lowerInput.startsWith('0x') && input.length >= 40;
-  console.log('🔍 isContractAddress check:', { input, lowerInput, startsWithOx: lowerInput.startsWith('0x'), length: input.length, result });
   return result;
 };
 
-// Detect if ticker is a stock (ends with .SW for Swiss, or is a known stock ticker)
+// FIXED: Better stock detection with known tickers
 const detectAssetType = (ticker: string): 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | 'ETF' => {
   const upperTicker = ticker.toUpperCase();
   
   // Swiss stocks (SIX exchange)
   if (upperTicker.endsWith('.SW')) {
+    console.log(`✅ Swiss stock detected: ${ticker}`);
     return 'STOCK_CH';
   }
   
-  // Common stock patterns (4 or fewer letters, no numbers)
-  if (/^[A-Z]{1,5}$/.test(upperTicker)) {
-    // Common crypto tickers to exclude
-    const cryptoTickers = ['BTC', 'ETH', 'SOL', 'ADA', 'DOT', 'MATIC', 'AVAX', 'LINK', 'UNI', 'ATOM'];
-    if (cryptoTickers.includes(upperTicker)) {
-      return 'CRYPTO';
-    }
-    
-    // Otherwise assume it's a US stock
+  // Known major US stocks (expand this list as needed)
+  const knownStocks = [
+    'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'TSLA', 'META', 'NVDA', 'AMD', 
+    'NFLX', 'DIS', 'V', 'MA', 'JPM', 'BAC', 'WMT', 'PG', 'JNJ', 'UNH', 'HD',
+    'CVX', 'XOM', 'PFE', 'KO', 'PEP', 'ABBV', 'MRK', 'COST', 'TMO', 'ABT'
+  ];
+  
+  if (knownStocks.includes(upperTicker)) {
+    console.log(`✅ Known US stock detected: ${ticker}`);
     return 'STOCK_US';
   }
   
-  // Default to crypto for everything else
+  // Known crypto tickers
+  const cryptoTickers = [
+    'BTC', 'ETH', 'SOL', 'ADA', 'DOT', 'MATIC', 'AVAX', 'LINK', 'UNI', 'ATOM',
+    'XRP', 'DOGE', 'SHIB', 'PEPE', 'ARB', 'OP', 'LTC', 'BCH', 'XLM', 'ALGO'
+  ];
+  
+  if (cryptoTickers.includes(upperTicker)) {
+    console.log(`✅ Crypto detected: ${ticker}`);
+    return 'CRYPTO';
+  }
+  
+  // Pattern: 1-4 uppercase letters = likely stock, 5+ = likely crypto
+  if (/^[A-Z]{1,4}$/.test(upperTicker)) {
+    console.log(`🔍 Pattern suggests US stock: ${ticker}`);
+    return 'STOCK_US';
+  }
+  
+  // Everything else is crypto
+  console.log(`🔍 Defaulting to crypto: ${ticker}`);
   return 'CRYPTO';
 };
 
@@ -114,82 +132,49 @@ const saveHistoricalData = (ticker: string, historyData: [number, number][]) => 
 };
 
 export const fetchTokenPriceFromDex = async (contractAddress: string): Promise<PriceResult> => {
-  console.log('🚀 fetchTokenPriceFromDex called with:', contractAddress);
+  console.log('🚀 DEXScreener fetch:', contractAddress);
   
   const normalizedAddress = contractAddress.toLowerCase();
   
   try {
     const url = `https://api.dexscreener.com/latest/dex/tokens/${normalizedAddress}`;
-    console.log('📡 Fetching from URL:', url);
-    
     const res = await fetch(url);
-    console.log('📥 Fetch response status:', res.status, res.ok);
     
     if (!res.ok) throw new Error(`DEXScreener API failed with status ${res.status}`);
     
     const data = await res.json();
-    console.log('✅ DEXScreener response received:', data);
     
     if (!data.pairs || data.pairs.length === 0) {
-      console.error('❌ No pairs found in response');
       throw new Error('No trading pairs found for this token');
     }
     
-    console.log(`📊 Found ${data.pairs.length} pairs`);
-    
     const sortedPairs = data.pairs
-      .filter((pair: any) => {
-        const hasPrice = pair.priceUsd && parseFloat(pair.priceUsd) > 0;
-        const liquidityUsd = parseFloat(pair.liquidity?.usd || 0);
-        console.log(`  Pair: ${pair.baseToken?.symbol} on ${pair.dexId} - Price: ${pair.priceUsd}, Liquidity: $${liquidityUsd}`);
-        return hasPrice;
-      })
+      .filter((pair: any) => pair.priceUsd && parseFloat(pair.priceUsd) > 0)
       .sort((a: any, b: any) => {
         const liquidityA = parseFloat(a.liquidity?.usd || 0);
         const liquidityB = parseFloat(b.liquidity?.usd || 0);
         return liquidityB - liquidityA;
       });
     
-    console.log(`✅ ${sortedPairs.length} valid pairs after filtering`);
-    
     if (sortedPairs.length === 0) {
-      console.error('❌ No valid pairs after filtering');
       throw new Error('No valid trading pairs with price data found');
     }
     
     const bestPair = sortedPairs[0];
-    console.log('🎯 Selected best pair:', {
-      dex: bestPair.dexId,
-      chain: bestPair.chainId,
-      symbol: bestPair.baseToken?.symbol,
-      priceUsd: bestPair.priceUsd,
-      liquidity: bestPair.liquidity?.usd
-    });
-    
-    const priceStr = String(bestPair.priceUsd);
-    const price = parseFloat(priceStr);
-    
-    console.log('💰 Price parsing:', { 
-      priceString: priceStr, 
-      parsedNumber: price,
-      isValid: !isNaN(price) && price > 0
-    });
+    const price = parseFloat(String(bestPair.priceUsd));
     
     if (isNaN(price) || price <= 0) {
-      console.error('❌ Invalid price:', { priceStr, price });
-      throw new Error(`Invalid price data: ${priceStr}`);
+      throw new Error(`Invalid price data: ${bestPair.priceUsd}`);
     }
     
     const tokenName = bestPair.baseToken?.name || 'Unknown Token';
     const tokenSymbol = bestPair.baseToken?.symbol || contractAddress.slice(0, 8);
     
-    console.log('🏷️ Token info:', { name: tokenName, symbol: tokenSymbol });
-    
     savePriceSnapshot(contractAddress, price);
     
     const liquidityUsdFormatted = (parseFloat(bestPair.liquidity?.usd || 0) / 1000000).toFixed(2);
     
-    const result = {
+    return {
       price,
       name: tokenName,
       symbol: tokenSymbol,
@@ -198,87 +183,139 @@ export const fetchTokenPriceFromDex = async (contractAddress: string): Promise<P
         title: `${bestPair.dexId} (${bestPair.chainId}) - Liq: $${liquidityUsdFormatted}M`,
         url: bestPair.url || `https://dexscreener.com/${bestPair.chainId}/${bestPair.pairAddress}`
       }],
-      rawText: `${tokenName} (${tokenSymbol}) - $${price} from ${bestPair.dexId} on ${bestPair.chainId}`
+      rawText: `${tokenName} (${tokenSymbol}) - $${price}`
     };
     
-    console.log('✅ fetchTokenPriceFromDex SUCCESS:', result);
-    return result;
-    
   } catch (error: any) {
-    console.error('❌ fetchTokenPriceFromDex ERROR:', error);
+    console.error('❌ DEXScreener error:', error);
     throw new Error(error.message || "Failed to fetch price from DEXScreener");
   }
 };
 
-// Fetch stock price and company name using Alpha Vantage (free tier: 25 requests/day)
+// FIXED: Fetch stock using Yahoo Finance (most reliable for names)
 const fetchStockPrice = async (ticker: string, assetType: 'STOCK_US' | 'STOCK_CH'): Promise<PriceResult> => {
-  console.log(`📈 Fetching stock price for ${ticker} (${assetType})`);
-  
-  // For Swiss stocks, use the .SW ticker directly
-  const searchTicker = ticker;
+  console.log(`📈 Fetching stock: ${ticker} (${assetType})`);
   
   try {
-    // Alpha Vantage API - Free tier: 25 requests/day, 500 requests/month
-    const apiKey = 'EVGJOHH32QUQXK2X'; // User's API key
-    const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${searchTicker}&apikey=${apiKey}`;
-    
-    console.log('📡 Fetching from Alpha Vantage:', url);
+    // Yahoo Finance API
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`;
     const res = await fetch(url);
     
     if (!res.ok) {
-      throw new Error(`Alpha Vantage API failed with status ${res.status}`);
+      throw new Error(`Yahoo Finance returned status ${res.status}`);
     }
     
     const data = await res.json();
-    console.log('✅ Alpha Vantage response:', data);
     
-    if (data['Global Quote'] && data['Global Quote']['05. price']) {
-      const price = parseFloat(data['Global Quote']['05. price']);
-      const companyName = data['Global Quote']['01. symbol'] || ticker;
+    if (data.chart?.result?.[0]) {
+      const result = data.chart.result[0];
+      const price = result.meta?.regularMarketPrice;
       
-      savePriceSnapshot(ticker, price);
+      // FIXED: Use longName from Yahoo, fallback to shortName, then ticker
+      let companyName = ticker; // Default to ticker
       
-      return {
-        price,
-        name: companyName,
-        symbol: ticker,
-        assetType,
-        sources: [{
-          title: 'Alpha Vantage',
-          url: `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${searchTicker}&apikey=${apiKey}`
-        }],
-        rawText: `${companyName} (${ticker}) - $${price}`
-      };
-    } else {
-      throw new Error('Invalid response from Alpha Vantage');
+      if (result.meta?.longName) {
+        companyName = result.meta.longName;
+      } else if (result.meta?.shortName) {
+        companyName = result.meta.shortName;
+      }
+      
+      console.log(`✅ Yahoo Finance result: ${companyName} = $${price}`);
+      
+      if (price && price > 0) {
+        savePriceSnapshot(ticker, price);
+        
+        return {
+          price,
+          name: companyName, // This will be "Apple Inc." not "BASED"
+          symbol: ticker,
+          assetType,
+          sources: [{
+            title: 'Yahoo Finance',
+            url: `https://finance.yahoo.com/quote/${ticker}`
+          }],
+          rawText: `${companyName} (${ticker}) - $${price}`
+        };
+      }
     }
-  } catch (error) {
-    console.warn('⚠️ Alpha Vantage failed, falling back to Gemini AI:', error);
-    // Fallback to Gemini AI for stocks
-    return fetchCryptoPriceViaGemini(ticker, assetType);
+    
+    throw new Error('Invalid Yahoo Finance response');
+  } catch (yahooError) {
+    console.warn('⚠️ Yahoo Finance failed, trying Alpha Vantage:', yahooError);
+    
+    // Fallback to Alpha Vantage
+    try {
+      const apiKey = 'EVGJOHH32QUQXK2X';
+      const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${apiKey}`;
+      
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        throw new Error(`Alpha Vantage returned status ${res.status}`);
+      }
+      
+      const data = await res.json();
+      
+      if (data['Global Quote'] && data['Global Quote']['05. price']) {
+        const price = parseFloat(data['Global Quote']['05. price']);
+        
+        // FIXED: Alpha Vantage doesn't provide company names, so use ticker
+        const companyName = ticker; // Keep as ticker, better than "BASED"
+        
+        savePriceSnapshot(ticker, price);
+        
+        console.log(`✅ Alpha Vantage: ${ticker} = $${price}`);
+        
+        return {
+          price,
+          name: companyName,
+          symbol: ticker,
+          assetType,
+          sources: [{
+            title: 'Alpha Vantage',
+            url: `https://www.alphavantage.co`
+          }],
+          rawText: `${ticker} - $${price}`
+        };
+      }
+      
+      throw new Error('Invalid Alpha Vantage response');
+    } catch (avError) {
+      console.error('❌ Both Yahoo and Alpha Vantage failed:', avError);
+      throw new Error(`Failed to fetch stock price for ${ticker}`);
+    }
   }
 };
 
-// Fallback: Use Gemini AI for stocks (original method)
-const fetchCryptoPriceViaGemini = async (ticker: string, assetType?: 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | 'ETF'): Promise<PriceResult> => {
-  console.log('📍 Using Gemini AI for:', ticker);
+export const fetchCryptoPrice = async (ticker: string): Promise<PriceResult> => {
+  console.log('🔵 fetchCryptoPrice:', ticker);
   
+  // Contract addresses go to DEXScreener
+  if (isContractAddress(ticker)) {
+    console.log('✅ Contract address detected → DEXScreener');
+    return fetchTokenPriceFromDex(ticker);
+  }
+  
+  // Auto-detect asset type
+  const assetType = detectAssetType(ticker);
+  console.log(`🔍 Detected type: ${assetType}`);
+  
+  // Stocks use Yahoo Finance / Alpha Vantage
+  if (assetType === 'STOCK_US' || assetType === 'STOCK_CH') {
+    return fetchStockPrice(ticker, assetType);
+  }
+  
+  // Crypto uses Gemini AI with grounding
   try {
     const apiKey = localStorage.getItem('gemini_api_key') || '';
     
     if (!apiKey) {
-      throw new Error("API key not configured. Please add your API key in settings.");
+      throw new Error("API key not configured");
     }
 
     const ai = new GoogleGenAI({ apiKey });
     
-    const assetTypeHint = assetType === 'STOCK_US' || assetType === 'STOCK_CH' 
-      ? `stock ticker ${ticker}` 
-      : `cryptocurrency token '${ticker}'`;
-    
-    const prompt = `Find the current live market price of the ${assetTypeHint} in USD from a reliable source like CoinGecko, CoinMarketCap, Yahoo Finance, or Google Finance.
-${assetType === 'STOCK_US' || assetType === 'STOCK_CH' ? 'Also provide the full company name.' : ''}
-Return ONLY the current numeric price value in USD. No symbols, no explanations.`;
+    const prompt = `What is the current USD price of ${ticker} cryptocurrency? Return only the numeric price, no currency symbols.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.0-flash-exp',
@@ -295,7 +332,7 @@ Return ONLY the current numeric price value in USD. No symbols, no explanations.
     let price = priceMatch ? parseFloat(priceMatch[0]) : 0;
     
     if (price <= 0) {
-      throw new Error("Could not extract valid price from AI response");
+      throw new Error("Could not extract valid price");
     }
     
     savePriceSnapshot(ticker, price);
@@ -304,63 +341,31 @@ Return ONLY the current numeric price value in USD. No symbols, no explanations.
       .filter(c => c.web && c.web.uri)
       .map(c => ({ title: c.web.title || 'Source', url: c.web.uri }));
 
-    // Extract company name from grounding metadata if available
-    let companyName = ticker;
-    if (assetType === 'STOCK_US' || assetType === 'STOCK_CH') {
-      const nameMatch = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+(?:Inc|Corp|Ltd|S\.A\.|AG|plc)\.?)?)/);
-      if (nameMatch) {
-        companyName = nameMatch[0];
-      }
-    }
-
     return { 
       price, 
-      name: companyName,
+      name: ticker, // Just use ticker for crypto
       symbol: ticker,
-      assetType: assetType || 'CRYPTO',
+      assetType: 'CRYPTO',
       sources, 
       rawText: text 
     };
   } catch (error: any) {
-    throw new Error(error.message || "Failed to fetch price");
+    throw new Error(error.message || "Failed to fetch crypto price");
   }
 };
 
-export const fetchCryptoPrice = async (ticker: string): Promise<PriceResult> => {
-  console.log('🔵 fetchCryptoPrice called with ticker:', ticker);
-  
-  if (isContractAddress(ticker)) {
-    console.log('✅ Detected as contract address, using DEXScreener');
-    return fetchTokenPriceFromDex(ticker);
-  }
-  
-  // Auto-detect asset type
-  const assetType = detectAssetType(ticker);
-  console.log(`🔍 Detected asset type: ${assetType}`);
-  
-  // Use Alpha Vantage for stocks (better historical data support)
-  if (assetType === 'STOCK_US' || assetType === 'STOCK_CH') {
-    return fetchStockPrice(ticker, assetType);
-  }
-  
-  // Use Gemini AI for crypto
-  return fetchCryptoPriceViaGemini(ticker, assetType);
-};
-
-// Fetch historical data for stocks using Alpha Vantage
+// Fetch historical data for stocks
 const fetchStockHistory = async (ticker: string): Promise<number[][] | undefined> => {
-  console.log(`📈 Fetching stock history for ${ticker}`);
+  console.log(`📈 Fetching stock history: ${ticker}`);
   
   try {
-    const apiKey = 'EVGJOHH32QUQXK2X'; // User's API key
-    // outputsize=full returns 20+ years of data (vs compact = 100 days only)
+    const apiKey = 'EVGJOHH32QUQXK2X';
     const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&outputsize=full&apikey=${apiKey}`;
     
-    console.log('📡 Fetching full stock history from Alpha Vantage...');
     const res = await fetch(url);
     
     if (!res.ok) {
-      throw new Error(`Alpha Vantage API returned status ${res.status}`);
+      throw new Error(`Alpha Vantage returned ${res.status}`);
     }
     
     const data = await res.json();
@@ -378,43 +383,36 @@ const fetchStockHistory = async (ticker: string): Promise<number[][] | undefined
         }
       }
       
-      // Sort by timestamp ascending
       historyData.sort((a, b) => a[0] - b[0]);
       
-      console.log(`✅ Fetched ${historyData.length} days of stock history`);
+      console.log(`✅ Fetched ${historyData.length} days of history`);
       
       const localSnapshots = loadPriceSnapshots(ticker);
       const merged = mergeHistoryWithSnapshots(historyData, localSnapshots);
       saveHistoricalData(ticker, merged);
       
       return merged;
-    } else {
-      console.warn('⚠️ No time series data in Alpha Vantage response');
-      return undefined;
     }
+    
+    return undefined;
   } catch (error) {
-    console.warn('⚠️ Failed to fetch stock history from Alpha Vantage:', error);
+    console.warn('⚠️ Stock history failed:', error);
     return undefined;
   }
 };
 
 export const fetchAssetHistory = async (ticker: string, currentPrice?: number, tokenSymbol?: string): Promise<number[][] | undefined> => {
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  const daysThreshold = 365;
-  
   // Detect asset type
   const assetType = detectAssetType(ticker);
   
-  // For stocks, use Alpha Vantage
+  // Stocks use Alpha Vantage
   if (assetType === 'STOCK_US' || assetType === 'STOCK_CH') {
     return fetchStockHistory(ticker);
   }
   
-  // For contract addresses with a known symbol, try CryptoCompare first
+  // Contract addresses: try CryptoCompare with symbol, then CoinGecko
   if (isContractAddress(ticker) && tokenSymbol) {
     try {
-      console.log(`📈 Trying CryptoCompare for DEX token symbol: ${tokenSymbol}`);
-      
       const res = await fetch(`https://min-api.cryptocompare.com/data/v2/histoday?fsym=${tokenSymbol.toUpperCase()}&tsym=USD&limit=2000`);
       
       if (res.ok) {
@@ -425,54 +423,29 @@ export const fetchAssetHistory = async (ticker: string, currentPrice?: number, t
             .map((d: any) => [d.time * 1000, d.close])
             .filter((p: any) => p[1] > 0);
           
-          console.log(`📊 CryptoCompare returned ${historyData.length} data points`);
-          
-          if (historyData.length >= daysThreshold) {
-            if (currentPrice && historyData.length > 0) {
-              const latestHistoricalPrice = historyData[historyData.length - 1][1];
-              const priceRatio = latestHistoricalPrice / currentPrice;
-              
-              console.log(`🔍 Price verification: Historical=${latestHistoricalPrice}, Current=${currentPrice}, Ratio=${priceRatio}`);
-              
-              if (priceRatio >= 0.5 && priceRatio <= 2.0) {
-                console.log(`✅ CryptoCompare has ${historyData.length} days - using it!`);
-                const localSnapshots = loadPriceSnapshots(ticker);
-                const merged = mergeHistoryWithSnapshots(historyData, localSnapshots);
-                saveHistoricalData(ticker, merged);
-                return merged;
-              } else {
-                console.warn(`⚠️ Price mismatch - trying CoinGecko instead`);
-              }
-            } else {
-              console.log(`✅ CryptoCompare has ${historyData.length} days - using it (no price verification)`);
-              const localSnapshots = loadPriceSnapshots(ticker);
-              const merged = mergeHistoryWithSnapshots(historyData, localSnapshots);
-              saveHistoricalData(ticker, merged);
-              return merged;
-            }
-          } else {
-            console.log(`⚠️ CryptoCompare only has ${historyData.length} days (< 365) - trying CoinGecko for better coverage`);
+          if (historyData.length >= 365) {
+            const localSnapshots = loadPriceSnapshots(ticker);
+            const merged = mergeHistoryWithSnapshots(historyData, localSnapshots);
+            saveHistoricalData(ticker, merged);
+            return merged;
           }
         }
       }
     } catch (e) {
-      console.warn('⚠️ CryptoCompare fetch failed:', e);
+      console.warn('CryptoCompare failed:', e);
     }
   }
   
-  // For contract addresses, try CoinGecko
+  // Contract addresses: CoinGecko fallback
   if (isContractAddress(ticker)) {
     try {
       const normalizedAddress = ticker.toLowerCase();
-      console.log('📈 Fetching history from CoinGecko (365 days):', normalizedAddress);
-      
       const res = await fetch(
         `https://api.coingecko.com/api/v3/coins/ethereum/contract/${normalizedAddress}/market_chart/?vs_currency=usd&days=365`
       );
       
       if (res.ok) {
         const json = await res.json();
-        console.log('✅ CoinGecko history received:', json.prices?.length, 'data points');
         
         if (json.prices && json.prices.length > 0) {
           const apiHistory = json.prices.filter((p: any) => p[1] > 0);
@@ -481,23 +454,21 @@ export const fetchAssetHistory = async (ticker: string, currentPrice?: number, t
           saveHistoricalData(ticker, merged);
           return merged;
         }
-      } else {
-        console.warn('⚠️ CoinGecko API returned status:', res.status);
       }
     } catch (e) {
-      console.warn('⚠️ CoinGecko history fetch failed:', e);
+      console.warn('CoinGecko failed:', e);
     }
     
+    // Return local snapshots if we have them
     const localSnapshots = loadPriceSnapshots(ticker);
     if (localSnapshots.length > 0) {
-      console.log(`📦 Using ${localSnapshots.length} local snapshots only`);
       return localSnapshots;
     }
     
     return undefined;
   }
   
-  // For regular crypto tickers, use CryptoCompare directly
+  // Regular crypto: CryptoCompare
   try {
      const res = await fetch(`https://min-api.cryptocompare.com/data/v2/histoday?fsym=${ticker.toUpperCase()}&tsym=USD&limit=2000`);
      if (res.ok) {
@@ -510,6 +481,9 @@ export const fetchAssetHistory = async (ticker: string, currentPrice?: number, t
            return merged;
         }
      }
-  } catch (e) { console.warn(e); }
+  } catch (e) { 
+    console.warn('Crypto history failed:', e);
+  }
+  
   return undefined;
 };
