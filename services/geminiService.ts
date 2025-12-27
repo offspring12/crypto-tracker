@@ -210,6 +210,20 @@ const fetchStockPrice = async (ticker: string, assetType: 'STOCK_US' | 'STOCK_CH
     
     const data = await res.json();
     console.log('📊 Alpha Vantage response:', data);
+    console.log('📊 Global Quote keys:', Object.keys(data['Global Quote'] || {}));
+    
+    // Check for rate limit message
+    if (data.Note || data['Information']) {
+      const msg = data.Note || data['Information'];
+      console.error('❌ Alpha Vantage limit/info:', msg);
+      throw new Error(`Alpha Vantage: ${msg}`);
+    }
+    
+    // Check for error message
+    if (data['Error Message']) {
+      console.error('❌ Alpha Vantage error:', data['Error Message']);
+      throw new Error(`Alpha Vantage: ${data['Error Message']}`);
+    }
     
     if (data['Global Quote'] && data['Global Quote']['05. price']) {
       const price = parseFloat(data['Global Quote']['05. price']);
@@ -218,13 +232,35 @@ const fetchStockPrice = async (ticker: string, assetType: 'STOCK_US' | 'STOCK_CH
         throw new Error('Invalid price from Alpha Vantage');
       }
       
-      // Try to get company name from symbol (Alpha Vantage doesn't provide it)
-      // We'll use ticker for now, can enhance later
-      const companyName = ticker;
+      // Alpha Vantage doesn't provide company name in GLOBAL_QUOTE
+      // We need to fetch it from OVERVIEW endpoint
+      let companyName = ticker; // Default to ticker
+      
+      try {
+        console.log('📡 Fetching company name from Alpha Vantage OVERVIEW...');
+        const overviewUrl = `https://www.alphavantage.co/query?function=OVERVIEW&symbol=${ticker}&apikey=${apiKey}`;
+        const overviewRes = await fetch(overviewUrl);
+        
+        if (overviewRes.ok) {
+          const overviewData = await overviewRes.json();
+          console.log('📊 Overview response keys:', Object.keys(overviewData));
+          
+          if (overviewData.Name) {
+            companyName = overviewData.Name;
+            console.log(`✅ Got company name: ${companyName}`);
+          } else if (overviewData.Note || overviewData['Information']) {
+            console.warn('⚠️ OVERVIEW rate limited, keeping ticker name');
+          } else {
+            console.warn('⚠️ No Name in OVERVIEW response');
+          }
+        }
+      } catch (nameError) {
+        console.warn('⚠️ Failed to fetch company name, using ticker:', nameError);
+      }
       
       savePriceSnapshot(ticker, price);
       
-      console.log(`✅ Alpha Vantage SUCCESS: ${ticker} = $${price}`);
+      console.log(`✅ Alpha Vantage SUCCESS: ${ticker} = $${price} (${companyName})`);
       
       return {
         price,
@@ -235,7 +271,7 @@ const fetchStockPrice = async (ticker: string, assetType: 'STOCK_US' | 'STOCK_CH
           title: 'Alpha Vantage',
           url: `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}`
         }],
-        rawText: `${ticker} - $${price}`
+        rawText: `${companyName} (${ticker}) - $${price}`
       };
     } else if (data.Note) {
       // API rate limit hit
@@ -389,6 +425,7 @@ const fetchStockHistory = async (ticker: string): Promise<number[][] | undefined
     const apiKey = 'EVGJOHH32QUQXK2X';
     const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&outputsize=full&apikey=${apiKey}`;
     
+    console.log('📡 Calling Alpha Vantage for historical data...');
     const res = await fetch(url);
     
     if (!res.ok) {
@@ -396,6 +433,19 @@ const fetchStockHistory = async (ticker: string): Promise<number[][] | undefined
     }
     
     const data = await res.json();
+    console.log('📊 History API response keys:', Object.keys(data));
+    
+    // Check for rate limit
+    if (data.Note || data['Information']) {
+      console.warn('⚠️ Alpha Vantage rate limit (history):', data.Note || data['Information']);
+      return undefined;
+    }
+    
+    // Check for error
+    if (data['Error Message']) {
+      console.warn('⚠️ Alpha Vantage error (history):', data['Error Message']);
+      return undefined;
+    }
     
     if (data['Time Series (Daily)']) {
       const timeSeries = data['Time Series (Daily)'];
@@ -418,12 +468,16 @@ const fetchStockHistory = async (ticker: string): Promise<number[][] | undefined
       const merged = mergeHistoryWithSnapshots(historyData, localSnapshots);
       saveHistoricalData(ticker, merged);
       
+      console.log(`✅ Saved ${merged.length} total data points to localStorage`);
+      
       return merged;
+    } else {
+      console.warn('⚠️ No "Time Series (Daily)" in response');
+      return undefined;
     }
     
-    return undefined;
   } catch (error) {
-    console.warn('⚠️ Stock history failed:', error);
+    console.error('❌ Stock history fetch failed:', error);
     return undefined;
   }
 };
