@@ -1,5 +1,6 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { PortfolioSummary, Asset } from '../types';
+import { fetchExchangeRates } from '../services/currencyService';
 import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle } from 'lucide-react';
 
 interface SummaryProps {
@@ -23,33 +24,40 @@ interface ChartDataPoint {
   costStack: Record<string, number>;
 }
 
-// Exchange rates for currency conversion (update these periodically or fetch from API)
-const EXCHANGE_RATES: Record<string, number> = {
-  'USD': 1.00,
-  'CHF': 0.92,  // 1 USD = 0.92 CHF (so 1 CHF = 1.087 USD)
-  'EUR': 0.93,  // 1 USD = 0.93 EUR (so 1 EUR = 1.075 USD)
-  'GBP': 0.79,  // 1 USD = 0.79 GBP (so 1 GBP = 1.266 USD)
-};
-
-// Convert any currency to display currency (default USD)
-const convertToDisplayCurrency = (value: number, fromCurrency: string, toCurrency: string = 'USD'): number => {
-  if (fromCurrency === toCurrency) return value;
-  
-  // Convert from source currency to USD
-  const valueInUSD = value / EXCHANGE_RATES[fromCurrency];
-  
-  // Convert from USD to target currency
-  return valueInUSD * EXCHANGE_RATES[toCurrency];
-};
-
 export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll, isGlobalLoading }) => {
   const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [hoverData, setHoverData] = useState<{ x: number, y: number, data: ChartDataPoint } | null>(null);
-  const chartContainerRef = useRef<HTMLDivElement>(null);
-  const [showAllAssets, setShowAllAssets] = useState(false);
   const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'CHF' | 'EUR'>('USD');
+  const [showAllAssets, setShowAllAssets] = useState(false);
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+
+  // Load exchange rates on mount
+  useEffect(() => {
+    const loadRates = async () => {
+      const rates = await fetchExchangeRates();
+      setExchangeRates(rates);
+      console.log('💱 Summary: Exchange rates loaded:', rates);
+    };
+    loadRates();
+  }, []);
+
+  // Convert any currency to display currency using dynamic rates
+  const convertToDisplayCurrency = (value: number, fromCurrency: string, toCurrency: string = 'USD'): number => {
+    if (fromCurrency === toCurrency) return value;
+    if (Object.keys(exchangeRates).length === 0) {
+      console.warn('⚠️ Exchange rates not loaded yet, using 1:1');
+      return value;
+    }
+    
+    // Convert to USD first
+    const valueInUSD = fromCurrency === 'USD' ? value : value / exchangeRates[fromCurrency];
+    
+    // Then convert to target currency
+    return toCurrency === 'USD' ? valueInUSD : valueInUSD * exchangeRates[toCurrency];
+  };
 
   // P4 CHANGE: Convert total value to selected currency
   const convertedTotalValue = convertToDisplayCurrency(summary.totalValue, 'USD', displayCurrency);
