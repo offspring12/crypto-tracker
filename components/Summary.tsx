@@ -29,10 +29,10 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [hoverData, setHoverData] = useState<{ x: number, y: number, data: ChartDataPoint } | null>(null);
-  const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'CHF' | 'EUR'>('USD');
-  const [showAllAssets, setShowAllAssets] = useState(false);
-  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  const [showAllAssets, setShowAllAssets] = useState(false);
+  const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'CHF' | 'EUR'>('USD');
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
 
   // Load exchange rates on mount
   useEffect(() => {
