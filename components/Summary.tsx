@@ -68,6 +68,17 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
     loadRates();
   }, []);
 
+  // 🔍 DEBUG: Log assets to see what currency field contains
+  useEffect(() => {
+    console.log('🔍 DEBUG - Assets in Summary:', assets.map(a => ({
+      ticker: a.ticker,
+      currency: a.currency,
+      currentPrice: a.currentPrice,
+      hasHistory: !!a.priceHistory,
+      historyLength: a.priceHistory?.length || 0
+    })));
+  }, [assets]);
+
   // Convert any currency to display currency using dynamic rates
   // This is a wrapper around convertCurrencySync that uses the loaded exchange rates
   const convertToDisplayCurrency = (value: number, fromCurrency: string, toCurrency: string = 'USD'): number => {
