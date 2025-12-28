@@ -2,30 +2,28 @@
 // Uses exchangerate-api.com free tier (1500 requests/month)
 
 interface ExchangeRatesResponse {
-  result: string;
-  documentation: string;
-  terms_of_use: string;
-  time_last_update_unix: number;
-  time_last_update_utc: string;
-  time_next_update_unix: number;
-  time_next_update_utc: string;
-  base_code: string;
-  conversion_rates: Record<string, number>;
+  provider?: string;
+  WARNING_UPGRADE_TO_V6?: string;
+  terms?: string;
+  base: string;
+  date: string;
+  time_last_updated?: number;
+  rates: Record<string, number>;
 }
 
 const EXCHANGE_RATE_CACHE_KEY = 'fx_rates_cache';
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 
-// Fallback rates (updated manually as backup - last updated Dec 2024)
+// Fallback rates (updated manually as backup - last updated Dec 28, 2024)
 // These are only used if the API fails completely
 const FALLBACK_RATES: Record<string, number> = {
   'USD': 1.00,
-  'CHF': 0.87,   // Updated from 0.92
-  'EUR': 0.93,   // Correct
-  'GBP': 0.78,   // Updated from 0.79
-  'JPY': 149.0,  // Updated from 110.0
-  'CAD': 1.43,   // Updated from 1.25
-  'AUD': 1.59,   // Updated from 1.35
+  'CHF': 0.789,  // Updated from live API
+  'EUR': 0.849,  // Updated from live API
+  'GBP': 0.741,  // Updated from live API
+  'JPY': 156.5,  // Updated from live API
+  'CAD': 1.37,   // Updated from live API
+  'AUD': 1.49,   // Updated from live API
 };
 
 interface CachedRates {
@@ -59,8 +57,8 @@ export const fetchExchangeRates = async (): Promise<Record<string, number>> => {
     
     const data: ExchangeRatesResponse = await response.json();
     
-    if (data.result === 'success' || data.conversion_rates) {
-      const rates = data.conversion_rates;
+    if (data.rates) {
+      const rates = data.rates;
       
       // Cache the fresh rates
       const cacheData: CachedRates = {
