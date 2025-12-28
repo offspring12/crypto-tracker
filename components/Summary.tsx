@@ -399,11 +399,11 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
     });
 
     const yLabels = [0, 0.5, 1].map(p => {
-       const valUSD = computedMaxY * (1 - p);
-       const valConverted = convertToDisplayCurrency(valUSD, 'USD', displayCurrency);
+       const val = computedMaxY * (1 - p);
+       // Values are already in display currency, no conversion needed
        return {
           y: p * 100,
-          text: new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(valConverted)
+          text: new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val)
        };
     });
 
@@ -695,7 +695,7 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                                       style: 'currency', 
                                       currency: displayCurrency, 
                                       maximumFractionDigits: 0 
-                                    }).format(convertToDisplayCurrency(hoverData.data.marketValue || 0, 'USD', displayCurrency))}
+                                    }).format(hoverData.data.marketValue || 0)}
                                 </div>
                             </div>
                             <div className="text-right">
@@ -738,12 +738,12 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                                             </span>
                                         </div>
                                         <div className="text-right text-slate-400 col-span-1">
-                                            {/* P4 CHANGE: Convert tooltip breakdown values to selected currency */}
+                                            {/* P4 CHANGE: Values already in display currency from chart calculation */}
                                             {new Intl.NumberFormat('en-US', { 
                                               style: 'currency', 
                                               currency: displayCurrency, 
                                               notation: 'compact' 
-                                            }).format(convertToDisplayCurrency(item.val, 'USD', displayCurrency))}
+                                            }).format(item.val)}
                                         </div>
                                         <div className={`text-right col-span-1 ${item.pl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                             {item.pl >= 0 ? '+' : ''}{item.plPct.toFixed(1)}%
