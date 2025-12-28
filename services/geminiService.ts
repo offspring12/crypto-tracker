@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { SourceLink } from "../types";
+import { SourceLink, Currency, AssetType } from "../types";
 
 export const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -9,8 +9,8 @@ interface PriceResult {
   rawText: string;
   name?: string;
   symbol?: string;
-  assetType?: 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | 'STOCK_DE' | 'ETF' | 'CASH';
-  currency?: string; // NEW: Currency for the asset (USD, CHF, EUR, etc.)
+  assetType?: AssetType;
+  currency?: Currency; // NEW: Currency for the asset (USD, CHF, EUR, etc.)
 }
 
 const isContractAddress = (input: string): boolean => {
@@ -21,7 +21,7 @@ const isContractAddress = (input: string): boolean => {
 };
 
 // CORRECTED: Proper asset type detection with crypto list FIRST
-const detectAssetType = (ticker: string): 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | 'STOCK_DE' | 'ETF' | 'CASH' => {
+const detectAssetType = (ticker: string): AssetType => {
   const upperTicker = ticker.toUpperCase();
   
   // CASH: Fiat currency codes (3-letter ISO codes) + stablecoins
@@ -41,6 +41,18 @@ const detectAssetType = (ticker: string): 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | '
   if (upperTicker.endsWith('.SW')) {
     console.log(`✅ Swiss stock detected: ${ticker}`);
     return 'STOCK_CH';
+  }
+  
+  // UK stocks (London exchange)
+  if (upperTicker.endsWith('.L')) {
+    console.log(`✅ UK stock detected: ${ticker}`);
+    return 'STOCK_UK';
+  }
+  
+  // Japan stocks (Tokyo exchange)
+  if (upperTicker.endsWith('.T')) {
+    console.log(`✅ Japan stock detected: ${ticker}`);
+    return 'STOCK_JP';
   }
   
   // PRIORITY 1: Known crypto tickers (check BEFORE stock patterns!)
@@ -82,7 +94,7 @@ const detectAssetType = (ticker: string): 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | '
 };
 
 // Save price snapshot to localStorage
-const savePriceSnapshot = (ticker: string, price: number) => {
+const savePriceSnapshot = (ticker: string, price: number, currency: Currency = 'USD') => {
   try {
     const key = `price_snapshots_${ticker}`;
     const existing = localStorage.getItem(key);
@@ -98,7 +110,7 @@ const savePriceSnapshot = (ticker: string, price: number) => {
         snapshots.shift();
       }
       localStorage.setItem(key, JSON.stringify(snapshots));
-      console.log(`💾 Saved price snapshot for ${ticker}: $${price}`);
+      console.log(`💾 Saved price snapshot for ${ticker}: ${price} ${currency}`);
     }
   } catch (e) {
     console.warn('Failed to save price snapshot:', e);
@@ -151,7 +163,7 @@ const saveHistoricalData = (ticker: string, historyData: [number, number][]) => 
 };
 
 // Fetch stock price AND history from Yahoo Finance
-const fetchYahooStock = async (ticker: string, assetType: 'STOCK_US' | 'STOCK_CH' | 'STOCK_DE'): Promise<PriceResult> => {
+const fetchYahooStock = async (ticker: string, assetType: 'STOCK_US' | 'STOCK_CH' | 'STOCK_DE' | 'STOCK_UK' | 'STOCK_JP'): Promise<PriceResult> => {
   console.log(`📈 Fetching stock from Yahoo Finance: ${ticker} (${assetType})`);
   
   const yahooUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?range=1y&interval=1d`;
@@ -211,16 +223,20 @@ const fetchYahooStock = async (ticker: string, assetType: 'STOCK_US' | 'STOCK_CH
       }
       
       // Determine currency based on asset type
-      let currency = 'USD'; // Default for STOCK_US
+      let currency: Currency = 'USD'; // Default for STOCK_US
       if (assetType === 'STOCK_CH') {
         currency = 'CHF';
       } else if (assetType === 'STOCK_DE') {
         currency = 'EUR';
+      } else if (assetType === 'STOCK_UK') {
+        currency = 'GBP';
+      } else if (assetType === 'STOCK_JP') {
+        currency = 'JPY';
       }
       
       console.log(`✅ Yahoo Finance SUCCESS (via ${proxyName}): ${companyName} = ${price} ${currency}`);
       
-      savePriceSnapshot(ticker, price);
+      savePriceSnapshot(ticker, price, currency);
       
       // Extract historical data
       const timestamps = result.timestamp || [];
@@ -345,7 +361,7 @@ export const fetchTokenPriceFromDex = async (contractAddress: string): Promise<P
     
     console.log('🏷️ Token info:', { name: tokenName, symbol: tokenSymbol });
     
-    savePriceSnapshot(contractAddress, price);
+    savePriceSnapshot(contractAddress, price, 'USD');
     
     const liquidityUsdFormatted = (parseFloat(bestPair.liquidity?.usd || 0) / 1000000).toFixed(2);
     
@@ -353,7 +369,7 @@ export const fetchTokenPriceFromDex = async (contractAddress: string): Promise<P
       price,
       name: tokenName,
       symbol: tokenSymbol,
-      currency: 'USD', // DEX prices are always in USD
+      currency: 'USD' as Currency, // DEX prices are always in USD
       sources: [{
         title: `${bestPair.dexId} (${bestPair.chainId}) - Liq: $${liquidityUsdFormatted}M`,
         url: bestPair.url || `https://dexscreener.com/${bestPair.chainId}/${bestPair.pairAddress}`
@@ -410,7 +426,7 @@ export const fetchCryptoPrice = async (ticker: string): Promise<PriceResult> => 
       name: currencyNames[tickerUpper] || tickerUpper,
       symbol: tickerUpper,
       assetType: 'CASH',
-      currency: tickerUpper, // ✅ NEW: Cash currency is the ticker itself
+      currency: tickerUpper as Currency, // ✅ NEW: Cash currency is the ticker itself
       sources: [{
         title: 'Cash/Currency',
         url: '#'
@@ -420,7 +436,7 @@ export const fetchCryptoPrice = async (ticker: string): Promise<PriceResult> => 
   }
   
   // Stocks → Yahoo Finance
-  if (assetType === 'STOCK_US' || assetType === 'STOCK_CH' || assetType === 'STOCK_DE') {
+  if (assetType === 'STOCK_US' || assetType === 'STOCK_CH' || assetType === 'STOCK_DE' || assetType === 'STOCK_UK' || assetType === 'STOCK_JP') {
     console.log('📈 Routing to Yahoo Finance (stocks)...');
     return fetchYahooStock(ticker, assetType);
   }
@@ -459,7 +475,7 @@ Return ONLY the current numeric price value in USD. No symbols, no explanations.
       throw new Error("Could not extract valid price from AI response");
     }
     
-    savePriceSnapshot(ticker, price);
+    savePriceSnapshot(ticker, price, 'USD');
     
     const sources: SourceLink[] = (response.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
       .filter(c => c.web && c.web.uri)
@@ -479,7 +495,7 @@ Return ONLY the current numeric price value in USD. No symbols, no explanations.
 
 export const fetchAssetHistory = async (ticker: string, currentPrice?: number, tokenSymbol?: string, assetType?: string): Promise<number[][] | undefined> => {
   // For stocks, history was already fetched with price!
-  if (assetType === 'STOCK_US' || assetType === 'STOCK_CH' || assetType === 'STOCK_DE') {
+  if (assetType === 'STOCK_US' || assetType === 'STOCK_CH' || assetType === 'STOCK_DE' || assetType === 'STOCK_UK' || assetType === 'STOCK_JP') {
     console.log(`📦 Stock history already saved for ${ticker}, loading from localStorage`);
     return loadPriceSnapshots(ticker);
   }

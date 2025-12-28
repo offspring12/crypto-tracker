@@ -197,7 +197,8 @@ const App: React.FC = () => {
           lastUpdated: new Date().toISOString(),
           isUpdating: false,
           error: undefined,
-          name: result.name || result.symbol || a.name
+          name: result.name || result.symbol || a.name,
+          currency: result.currency || 'USD' // ✅ Store currency from API
         } : a)
       }));
     } catch (error: any) {
@@ -270,7 +271,8 @@ const App: React.FC = () => {
             sources: result.sources, 
             isUpdating: false,
             name: result.name || result.symbol || a.name,
-            assetType: result.assetType || 'CRYPTO' // Auto-detect from API
+            assetType: result.assetType || 'CRYPTO', // Auto-detect from API
+            currency: result.currency || 'USD' // ✅ Store currency from API
           } : a)
         }));
         
