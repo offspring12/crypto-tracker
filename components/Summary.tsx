@@ -298,68 +298,87 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
             );
             costStack[asset.id] = costInDisplay;
 
-            // B. Find Price at time t - SIMPLIFIED LOGIC
-            let estimatedPrice = asset.currentPrice;
+            // 🔧 FIX: Check if this is a cash asset (ticker is a currency code)
+            const isCashAsset = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD'].includes(asset.ticker.toUpperCase());
 
-            if (asset.priceHistory && asset.priceHistory.length > 0) {
-                const history = asset.priceHistory;
-                
-                // BEFORE first historical data point - use first purchase price
-                if (t < history[0][0]) {
+            let valInDisplay: number;
+
+            if (isCashAsset) {
+                // For cash: quantity is already the amount in native currency
+                // Just convert quantity directly to display currency using historical rate
+                const valDate = new Date(t);
+                valInDisplay = convertCurrencySyncHistorical(
+                  qtyAtTime,
+                  assetCurrency,
+                  displayCurrency,
+                  valDate,
+                  historicalRates,
+                  exchangeRates
+                );
+            } else {
+                // For stocks/crypto: use price history logic
+                let estimatedPrice = asset.currentPrice;
+
+                if (asset.priceHistory && asset.priceHistory.length > 0) {
+                    const history = asset.priceHistory;
+                    
+                    // BEFORE first historical data point - use first purchase price
+                    if (t < history[0][0]) {
+                        const sortedTxs = asset.transactions
+                            .slice()
+                            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                        estimatedPrice = sortedTxs[0]?.pricePerCoin || asset.avgBuyPrice;
+                    }
+                    // AFTER last historical data point - use current price
+                    else if (t >= history[history.length - 1][0]) {
+                        estimatedPrice = asset.currentPrice;
+                    }
+                    // BETWEEN data points - interpolate
+                    else {
+                        const idx = history.findIndex(p => p[0] >= t);
+                        
+                        if (idx === 0) {
+                            estimatedPrice = history[0][1];
+                        } else if (idx === -1) {
+                            estimatedPrice = history[history.length - 1][1];
+                        } else {
+                            const p1 = history[idx - 1];
+                            const p2 = history[idx];
+                            const span = p2[0] - p1[0];
+                            if (span > 0) {
+                                const progress = (t - p1[0]) / span;
+                                estimatedPrice = p1[1] + (p2[1] - p1[1]) * progress;
+                            } else {
+                                estimatedPrice = p1[1];
+                            }
+                        }
+                    }
+                } else {
+                    // No historical data - use purchase price before now, current price after
                     const sortedTxs = asset.transactions
                         .slice()
                         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-                    estimatedPrice = sortedTxs[0]?.pricePerCoin || asset.avgBuyPrice;
-                }
-                // AFTER last historical data point - use current price
-                else if (t >= history[history.length - 1][0]) {
-                    estimatedPrice = asset.currentPrice;
-                }
-                // BETWEEN data points - interpolate
-                else {
-                    const idx = history.findIndex(p => p[0] >= t);
+                    const firstPurchaseTime = new Date(sortedTxs[0]?.date || now).getTime();
                     
-                    if (idx === 0) {
-                        estimatedPrice = history[0][1];
-                    } else if (idx === -1) {
-                        estimatedPrice = history[history.length - 1][1];
+                    if (t < firstPurchaseTime) {
+                        estimatedPrice = sortedTxs[0]?.pricePerCoin || asset.avgBuyPrice;
                     } else {
-                        const p1 = history[idx - 1];
-                        const p2 = history[idx];
-                        const span = p2[0] - p1[0];
-                        if (span > 0) {
-                            const progress = (t - p1[0]) / span;
-                            estimatedPrice = p1[1] + (p2[1] - p1[1]) * progress;
-                        } else {
-                            estimatedPrice = p1[1];
-                        }
+                        estimatedPrice = asset.currentPrice;
                     }
                 }
-            } else {
-                // No historical data - use purchase price before now, current price after
-                const sortedTxs = asset.transactions
-                    .slice()
-                    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-                const firstPurchaseTime = new Date(sortedTxs[0]?.date || now).getTime();
-                
-                if (t < firstPurchaseTime) {
-                    estimatedPrice = sortedTxs[0]?.pricePerCoin || asset.avgBuyPrice;
-                } else {
-                    estimatedPrice = asset.currentPrice;
-                }
-            }
 
-            const valInNativeCurrency = qtyAtTime * estimatedPrice;
-            // Convert to display currency using HISTORICAL rate for date t
-            const valDate = new Date(t);
-            const valInDisplay = convertCurrencySyncHistorical(
-              valInNativeCurrency,
-              assetCurrency,
-              displayCurrency,
-              valDate,
-              historicalRates,
-              exchangeRates
-            );
+                const valInNativeCurrency = qtyAtTime * estimatedPrice;
+                // Convert to display currency using HISTORICAL rate for date t
+                const valDate = new Date(t);
+                valInDisplay = convertCurrencySyncHistorical(
+                  valInNativeCurrency,
+                  assetCurrency,
+                  displayCurrency,
+                  valDate,
+                  historicalRates,
+                  exchangeRates
+                );
+            }
             
             stack[asset.id] = valInDisplay;
             totalVal += valInDisplay;
