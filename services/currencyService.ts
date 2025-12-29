@@ -262,11 +262,14 @@ const checkIfAllDatesAreCached = (
  * 🔧 FIXED: Convert currency using historical rates with intelligent inverse rate calculation
  * Used for chart calculations with date-specific exchange rates
  * 
- * Handles 4 conversion cases:
- * 1. Direct rates available for both currencies
- * 2. USD → Target (direct multiplication)
- * 3. Source → USD (inverse rate calculation)
- * 4. Cross-currency via USD (combine inverse + direct)
+ * Rates from frankfurter.app are in "USD to X" format:
+ * Example: { USD: 1.0, CHF: 0.88, EUR: 0.95 }
+ * This means: 1 USD = 0.88 CHF (NOT 1 CHF = 0.88 USD!)
+ * 
+ * Handles 3 conversion cases:
+ * 1. USD → Target (direct multiplication)
+ * 2. Source → USD (inverse rate calculation)
+ * 3. Cross-currency via USD (combine inverse + direct)
  */
 export const convertCurrencySyncHistorical = (
   amount: number,
@@ -282,59 +285,60 @@ export const convertCurrencySyncHistorical = (
   }
   
   const dateStr = date.toISOString().split('T')[0];
-  const ratesForDate = historicalRates[dateStr];
+  let ratesForDate = historicalRates[dateStr];
   
+  // 🔧 FIX: Weekend/Holiday fallback - use previous day's rate
   if (!ratesForDate) {
-    console.warn(`⚠️ No historical rates for ${dateStr}, using current rates as fallback`);
-    return convertCurrencySync(amount, fromCurrency, toCurrency, fallbackCurrentRates);
+    console.warn(`⚠️ No historical rates for ${dateStr}, trying previous days...`);
+    
+    // Try up to 7 days back (to handle long weekends)
+    for (let daysBack = 1; daysBack <= 7; daysBack++) {
+      const prevDate = new Date(date);
+      prevDate.setDate(prevDate.getDate() - daysBack);
+      const prevDateStr = prevDate.toISOString().split('T')[0];
+      
+      if (historicalRates[prevDateStr]) {
+        console.log(`   ✅ Using rates from ${prevDateStr} (${daysBack} days back)`);
+        ratesForDate = historicalRates[prevDateStr];
+        break;
+      }
+    }
+    
+    // If still no rates, use current rates
+    if (!ratesForDate) {
+      console.warn(`   ❌ No historical rates found, using current rates as fallback`);
+      return convertCurrencySync(amount, fromCurrency, toCurrency, fallbackCurrentRates);
+    }
   }
   
   console.log(`💱 [${dateStr}] Converting ${amount} ${fromCurrency} → ${toCurrency}`);
   console.log(`   Available rates:`, Object.keys(ratesForDate).join(', '));
   
-  // Case 1: Both currencies available directly
-  if (ratesForDate[fromCurrency] !== undefined && ratesForDate[toCurrency] !== undefined) {
-    const fromRate = ratesForDate[fromCurrency];
-    const toRate = ratesForDate[toCurrency];
-    const amountInUSD = amount / fromRate;
-    const result = amountInUSD * toRate;
-    console.log(`   ✅ Case 1 (Direct): ${amount} / ${fromRate} * ${toRate} = ${result}`);
-    return result;
-  }
-  
-  // Case 2: From USD to target (e.g., USD → CHF)
+  // Case 1: USD → Target currency (direct multiplication)
   if (fromCurrency === 'USD' && ratesForDate[toCurrency] !== undefined) {
     const result = amount * ratesForDate[toCurrency];
-    console.log(`   ✅ Case 2 (USD→Target): ${amount} * ${ratesForDate[toCurrency]} = ${result}`);
+    console.log(`   ✅ Case 1 (USD→Target): ${amount} * ${ratesForDate[toCurrency]} = ${result}`);
     return result;
   }
   
-  // Case 3: From source to USD (e.g., CHF → USD) - INVERSE RATE
+  // Case 2: Source → USD (inverse rate)
   if (toCurrency === 'USD' && ratesForDate[fromCurrency] !== undefined) {
     const inverseRate = 1 / ratesForDate[fromCurrency];
     const result = amount * inverseRate;
-    console.log(`   ✅ Case 3 (Source→USD inverse): ${amount} * (1/${ratesForDate[fromCurrency]}) = ${amount} * ${inverseRate} = ${result}`);
+    console.log(`   ✅ Case 2 (Source→USD inverse): ${amount} * (1/${ratesForDate[fromCurrency]}) = ${amount} * ${inverseRate.toFixed(6)} = ${result}`);
     return result;
   }
   
-  // Case 4: Cross-currency via USD (e.g., CHF → EUR)
-  // Use inverse for from-currency if needed
-  let fromToUsdRate: number | undefined;
-  let usdToToRate: number | undefined;
-  
-  if (ratesForDate[fromCurrency] !== undefined) {
-    fromToUsdRate = 1 / ratesForDate[fromCurrency]; // Inverse: CHF→USD
-    console.log(`   📐 From→USD inverse rate: 1/${ratesForDate[fromCurrency]} = ${fromToUsdRate}`);
-  }
-  
-  if (ratesForDate[toCurrency] !== undefined) {
-    usdToToRate = ratesForDate[toCurrency]; // Direct: USD→EUR
-    console.log(`   📐 USD→To rate: ${usdToToRate}`);
-  }
-  
-  if (fromToUsdRate !== undefined && usdToToRate !== undefined) {
-    const result = amount * fromToUsdRate * usdToToRate;
-    console.log(`   ✅ Case 4 (Cross-currency): ${amount} * ${fromToUsdRate} * ${usdToToRate} = ${result}`);
+  // Case 3: Cross-currency via USD (e.g., CHF → EUR)
+  if (ratesForDate[fromCurrency] !== undefined && ratesForDate[toCurrency] !== undefined) {
+    // Step 1: Source → USD (inverse)
+    const sourceToUsd = 1 / ratesForDate[fromCurrency];
+    const amountInUSD = amount * sourceToUsd;
+    
+    // Step 2: USD → Target (direct)
+    const result = amountInUSD * ratesForDate[toCurrency];
+    
+    console.log(`   ✅ Case 3 (Cross-currency): ${amount} * (1/${ratesForDate[fromCurrency]}) * ${ratesForDate[toCurrency]} = ${result}`);
     return result;
   }
   
