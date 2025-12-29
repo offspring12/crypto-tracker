@@ -159,15 +159,19 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
       convertedTotalValue: totalValue,
       convertedCostBasis: totalCostBasis,
       convertedPnL: pnl,
+      // 💰 CHANGED: Added minimumFractionDigits: 2 and maximumFractionDigits: 2
       formattedTotal: new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: displayCurrency,
-        maximumFractionDigits: 0
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
       }).format(totalValue),
+      // 💰 CHANGED: Added minimumFractionDigits: 2 and maximumFractionDigits: 2
       formattedPnL: new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: displayCurrency,
-        maximumFractionDigits: 0,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
         signDisplay: "always"
       }).format(pnl),
       pnlPercent: pnlPct
@@ -478,10 +482,14 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
 
     const yLabels = [0, 0.5, 1].map(p => {
        const val = computedMaxY * (1 - p);
-       // Values are already in display currency, no conversion needed
+       // 📊 CHANGED: Added minimumFractionDigits: 2 for Y-axis labels
        return {
           y: p * 100,
-          text: new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val)
+          text: new Intl.NumberFormat('en-US', { 
+            notation: "compact", 
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2 
+          }).format(val)
        };
     });
 
@@ -766,13 +774,14 @@ export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll,
                          
                          <div className="grid grid-cols-2 gap-x-4 mb-3 border-b border-slate-700/50 pb-2">
                             <div>
-                                {/* P4 CHANGE: Show selected currency in tooltip */}
+                                {/* 📊 CHANGED: Added minimumFractionDigits: 2 and maximumFractionDigits: 2 */}
                                 <span className="text-[10px] text-slate-400 uppercase">Value ({displayCurrency})</span>
                                 <div className="text-sm font-bold text-white">
                                     {new Intl.NumberFormat('en-US', { 
                                       style: 'currency', 
-                                      currency: displayCurrency, 
-                                      maximumFractionDigits: 0 
+                                      currency: displayCurrency,
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2
                                     }).format(hoverData.data.marketValue || 0)}
                                 </div>
                             </div>
