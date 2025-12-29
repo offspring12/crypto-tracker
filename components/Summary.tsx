@@ -1,13 +1,17 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { PortfolioSummary, Asset } from '../types';
+import { PortfolioSummary, Asset, Currency } from '../types';
 import { fetchExchangeRates, convertCurrencySync, fetchHistoricalExchangeRates, convertCurrencySyncHistorical } from '../services/currencyService';
 import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle } from 'lucide-react';
 
+// P1.1 CHANGE: Updated interface to receive displayCurrency and exchangeRates as props
 interface SummaryProps {
   summary: PortfolioSummary;
   assets: Asset[];
   onRefreshAll: () => void;
   isGlobalLoading: boolean;
+  displayCurrency: Currency;
+  setDisplayCurrency: (currency: Currency) => void;
+  exchangeRates: Record<string, number>;
 }
 
 const CHART_COLORS = [
@@ -46,29 +50,31 @@ interface ChartDataPoint {
   costStack: Record<string, number>;
 }
 
-export const Summary: React.FC<SummaryProps> = ({ summary, assets, onRefreshAll, isGlobalLoading }) => {
+// P1.1 CHANGE: Destructure displayCurrency, setDisplayCurrency, and exchangeRates from props
+export const Summary: React.FC<SummaryProps> = ({ 
+  summary, 
+  assets, 
+  onRefreshAll, 
+  isGlobalLoading,
+  displayCurrency,
+  setDisplayCurrency,
+  exchangeRates 
+}) => {
   const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [hoverData, setHoverData] = useState<{ x: number, y: number, data: ChartDataPoint } | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [showAllAssets, setShowAllAssets] = useState(false);
-  const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'CHF' | 'EUR'>('USD');
-  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
-  const [ratesLoaded, setRatesLoaded] = useState(false);
+  
+  // P1.1 CHANGE: Remove local displayCurrency and exchangeRates state - now using props
+  // P1.1 CHANGE: Keep ratesLoaded based on whether exchangeRates has data
+  const ratesLoaded = Object.keys(exchangeRates).length > 0;
+  
   const [historicalRates, setHistoricalRates] = useState<Record<string, Record<string, number>>>({});
   const [historicalRatesLoaded, setHistoricalRatesLoaded] = useState(false);
 
-  // Load exchange rates on mount
-  useEffect(() => {
-    const loadRates = async () => {
-      const rates = await fetchExchangeRates();
-      setExchangeRates(rates);
-      setRatesLoaded(true);
-      console.log('💱 Summary: Exchange rates loaded:', rates);
-    };
-    loadRates();
-  }, []);
+  // P1.1 CHANGE: Remove exchange rates loading useEffect - now handled in App.tsx
 
   // Load historical exchange rates when time range or assets change
   useEffect(() => {

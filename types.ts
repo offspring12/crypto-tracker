@@ -83,3 +83,21 @@ export enum LoadingState {
   SUCCESS = 'SUCCESS',
   ERROR = 'ERROR'
 }
+
+// P1.1: Tag Analytics Performance Tracking
+export interface TagPerformance {
+  tag: string;
+  totalInvested: number;         // In display currency
+  currentValue: number;           // In display currency
+  pnl: number;                    // In display currency
+  pnlPercent: number;
+  transactionCount: number;
+  assetBreakdown: Array<{
+    ticker: string;
+    name: string;
+    invested: number;             // In display currency
+    currentValue: number;         // In display currency
+    pnl: number;                  // In display currency
+    pnlPercent: number;
+  }>;
+}

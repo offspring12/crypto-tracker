@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot, TransactionTag, Currency } from './types';
 import { fetchCryptoPrice, fetchAssetHistory, delay } from './services/geminiService';
+import { fetchExchangeRates } from './services/currencyService';
 import { AssetCard } from './components/AssetCard';
 import { AddAssetForm } from './components/AddAssetForm';
 import { Summary } from './components/Summary';
+import { TagAnalytics } from './components/TagAnalytics';
 import { ApiKeySettings } from './components/ApiKeySettings';
 import { PortfolioManager } from './components/PortfolioManager';
 import { Wallet, Download, Upload, Settings, Key, FolderOpen, Plus, Check } from 'lucide-react';
@@ -99,6 +101,10 @@ const App: React.FC = () => {
   const [hasApiKey, setHasApiKey] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // P1.1 CHANGE: Lift displayCurrency and exchangeRates to App level
+  const [displayCurrency, setDisplayCurrency] = useState<Currency>('USD');
+  const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
+
   // Get active portfolio
   const activePortfolio = portfolios.find(p => p.id === activePortfolioId) || portfolios[0];
   const assets = activePortfolio?.assets || [];
@@ -139,6 +145,16 @@ const App: React.FC = () => {
     window.addEventListener('storage', checkApiKey);
     return () => window.removeEventListener('storage', checkApiKey);
   }, [isSettingsOpen]);
+
+  // P1.1 CHANGE: Load exchange rates on mount
+  useEffect(() => {
+    const loadRates = async () => {
+      const rates = await fetchExchangeRates();
+      setExchangeRates(rates);
+      console.log('💱 App: Exchange rates loaded:', rates);
+    };
+    loadRates();
+  }, []);
 
   // Save portfolios to localStorage
   useEffect(() => {
@@ -573,7 +589,24 @@ const App: React.FC = () => {
       )}
 
       <main className="max-w-screen-2xl mx-auto px-8 py-8">
-        <Summary summary={summary} assets={assets} onRefreshAll={handleRefreshAll} isGlobalLoading={isLoading} />
+        {/* P1.1 CHANGE: Pass displayCurrency, setDisplayCurrency, and exchangeRates to Summary */}
+        <Summary 
+          summary={summary} 
+          assets={assets} 
+          onRefreshAll={handleRefreshAll} 
+          isGlobalLoading={isLoading}
+          displayCurrency={displayCurrency}
+          setDisplayCurrency={setDisplayCurrency}
+          exchangeRates={exchangeRates}
+        />
+        
+        {/* P1.1 NEW: Add TagAnalytics component */}
+        <TagAnalytics 
+          assets={assets}
+          displayCurrency={displayCurrency}
+          exchangeRates={exchangeRates}
+        />
+        
         <AddAssetForm onAdd={handleAddAsset} isGlobalLoading={isLoading} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {assets.map(asset => (
