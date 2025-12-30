@@ -50,7 +50,7 @@ const getPerformanceTextColor = (pnlPercent: number): string => {
 
 export const TagAnalytics: React.FC<TagAnalyticsProps> = ({ assets, displayCurrency, exchangeRates }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [expandedTag, setExpandedTag] = useState<string | null>(null);
+  const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
 
   // Calculate tag performance
   const tagPerformance = useMemo<TagPerformance[]>(() => {
@@ -253,7 +253,7 @@ export const TagAnalytics: React.FC<TagAnalyticsProps> = ({ assets, displayCurre
       {isExpanded && (
         <div className="space-y-3 mt-4">
           {tagPerformance.map((tag) => {
-            const isTagExpanded = expandedTag === tag.tag;
+            const isTagExpanded = expandedTags.has(tag.tag);
             const maxPnlPercent = Math.max(...tagPerformance.map(t => Math.abs(t.pnlPercent)));
             const barWidth = maxPnlPercent > 0 ? (Math.abs(tag.pnlPercent) / maxPnlPercent) * 100 : 0;
 
@@ -283,7 +283,15 @@ export const TagAnalytics: React.FC<TagAnalyticsProps> = ({ assets, displayCurre
                   </div>
                   
                   <button
-                    onClick={() => setExpandedTag(isTagExpanded ? null : tag.tag)}
+                    onClick={() => {
+                      const newExpanded = new Set(expandedTags);
+                      if (isTagExpanded) {
+                        newExpanded.delete(tag.tag);
+                      } else {
+                        newExpanded.add(tag.tag);
+                      }
+                      setExpandedTags(newExpanded);
+                    }}
                     className="text-slate-400 hover:text-slate-300 transition-colors"
                   >
                     {isTagExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
