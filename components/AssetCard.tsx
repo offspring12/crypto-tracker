@@ -33,6 +33,47 @@ const ASSET_TYPE_CONFIG = {
   CASH: { emoji: '💵', label: 'Cash', color: 'border-gray-500/50 bg-gray-500/10 text-gray-300' }
 };
 
+// P1.1B NEW: Helper function for FX-adjusted P&L calculation
+const calculateFxAdjustedPnL = (
+  tx: any,
+  assetCurrency: Currency,
+  currentPrice: number
+): { pnl: number; costBasis: number; currentValue: number } => {
+  const currentValue = tx.quantity * currentPrice;
+  
+  // If transaction has historical FX rates, use them for accurate conversion
+  if (tx.exchangeRateAtPurchase && tx.purchaseCurrency) {
+    const purchaseCurrency = tx.purchaseCurrency;
+    
+    // Get historical rate for the asset's currency at purchase time
+    const historicalRate = tx.exchangeRateAtPurchase[assetCurrency];
+    
+    if (historicalRate) {
+      // Convert historical cost from purchase currency to asset currency using historical rate
+      // Example: Bought BTC for $10k when USD->CHF was 0.88
+      // Cost in CHF = $10k * 0.88 = CHF 8,800
+      const costBasisInAssetCurrency = tx.totalCost * historicalRate;
+      const pnl = currentValue - costBasisInAssetCurrency;
+      
+      return {
+        pnl,
+        costBasis: costBasisInAssetCurrency,
+        currentValue
+      };
+    }
+  }
+  
+  // Fallback: No FX adjustment (old transactions or missing data)
+  const costBasis = tx.totalCost;
+  const pnl = currentValue - costBasis;
+  
+  return {
+    pnl,
+    costBasis,
+    currentValue
+  };
+};
+
 export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue, onRemove, onRemoveTransaction, onRefresh, onUpdate, onEditTransaction }) => {
   const [showDetails, setShowDetails] = useState(false);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
@@ -44,8 +85,22 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
     customTag: ''
   });
 
-  const currentTotalValue = asset.quantity * asset.currentPrice;
-  const totalCost = asset.totalCostBasis;
+  // Use asset's native currency for display
+  const assetCurrency: Currency = asset.currency || 'USD';
+
+  // P1.1B CHANGE: Calculate FX-adjusted total P&L
+  // Calculate aggregate FX-adjusted values
+  let totalFxAdjustedCost = 0;
+  let totalCurrentValue = 0;
+  
+  asset.transactions.forEach(tx => {
+    const { costBasis, currentValue } = calculateFxAdjustedPnL(tx, assetCurrency, asset.currentPrice);
+    totalFxAdjustedCost += costBasis;
+    totalCurrentValue += currentValue;
+  });
+  
+  const currentTotalValue = totalCurrentValue;
+  const totalCost = totalFxAdjustedCost;
   const profitLoss = currentTotalValue - totalCost;
   const profitLossPercent = totalCost > 0 ? (profitLoss / totalCost) * 100 : 0;
   
@@ -57,8 +112,6 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
   const deviation = currentAllocation - targetAllocation;
   const isDeviationSignificant = targetAllocation > 0 && Math.abs(deviation) >= 5;
 
-  // Use asset's native currency for display
-  const assetCurrency: Currency = asset.currency || 'USD';
   const currencyFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: assetCurrency });
   const pctFmt = new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 2, signDisplay: "always" });
 
@@ -210,7 +263,9 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
                 </thead>
                 <tbody className="divide-y divide-slate-700/50 text-slate-300">
                   {asset.transactions.map((tx) => {
-                    const txPnL = (tx.quantity * asset.currentPrice) - tx.totalCost;
+                    // P1.1B CHANGE: Use FX-adjusted P&L calculation
+                    const { pnl: txPnL } = calculateFxAdjustedPnL(tx, assetCurrency, asset.currentPrice);
+                    
                     const isEditing = editingTxId === tx.id;
                     const txTag = tx.tag || 'DCA';
                     const isCustomTag = !['DCA', 'FOMO', 'Strategic', 'Rebalance', 'Emergency', 'Profit-Taking', 'Research'].includes(txTag);

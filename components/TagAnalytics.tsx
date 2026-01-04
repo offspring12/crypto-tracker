@@ -68,11 +68,21 @@ export const TagAnalytics: React.FC<TagAnalyticsProps> = ({ assets, displayCurre
       for (const tx of asset.transactions) {
         const tag = tx.tag || 'Untagged';
         
-        // Calculate current value from this transaction
-        const currentValueFromTx = asset.currentPrice * tx.quantity;
-        const investedFromTx = tx.totalCost;
+        // P1.1B CHANGE: Calculate FX-adjusted cost basis
+        // Start with the transaction's total cost
+        let investedFromTx = tx.totalCost;
         
-        // Convert to display currency
+        // If transaction has historical FX rates, use them for accurate cost conversion
+        if (tx.exchangeRateAtPurchase && tx.purchaseCurrency && tx.exchangeRateAtPurchase[assetCurrency]) {
+          // Convert cost from purchase currency to asset currency using historical rate
+          // Example: Bought for $10k when USD->CHF was 0.88 = CHF 8,800
+          investedFromTx = tx.totalCost * tx.exchangeRateAtPurchase[assetCurrency];
+        }
+        
+        // Calculate current value from this transaction (always in asset currency)
+        const currentValueFromTx = asset.currentPrice * tx.quantity;
+        
+        // Convert both to display currency using current rates
         const currentValueInDisplay = convertCurrencySync(
           currentValueFromTx,
           assetCurrency,

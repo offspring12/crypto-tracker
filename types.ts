@@ -18,6 +18,7 @@ export type AssetType = 'CRYPTO' | 'STOCK_US' | 'STOCK_CH' | 'STOCK_DE' | 'ETF' 
 // Supported currencies
 export type Currency = 'USD' | 'CHF' | 'EUR' | 'GBP' | 'JPY' | 'CAD' | 'AUD';
 
+// P1.1B CHANGE: Added purchaseCurrency and exchangeRateAtPurchase for FX-adjusted performance
 export interface Transaction {
   id: string;
   type: 'BUY' | 'SELL';
@@ -28,6 +29,8 @@ export interface Transaction {
   tag?: TransactionTag;
   lastEdited?: string;
   createdAt?: string;
+  purchaseCurrency?: Currency; // P1.1B NEW: Currency used at purchase time (e.g., 'USD', 'CHF')
+  exchangeRateAtPurchase?: Record<Currency, number>; // P1.1B NEW: Snapshot of ALL exchange rates at purchase date
 }
 
 export interface Asset {

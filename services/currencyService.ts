@@ -237,6 +237,46 @@ export const fetchHistoricalExchangeRates = async (
 };
 
 /**
+ * P1.1B NEW: Fetch historical exchange rates for a SINGLE date
+ * Returns rates relative to USD for that specific date
+ * Uses frankfurter.app API which is free and supports historical data
+ */
+export const fetchHistoricalExchangeRatesForDate = async (date: Date): Promise<Record<string, number>> => {
+  try {
+    const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD format
+    console.log(`💱 Fetching historical FX rates for ${dateStr}...`);
+
+    // frankfurter.app provides historical rates with USD as base
+    const response = await fetch(`https://api.frankfurter.app/${dateStr}?from=USD`);
+    
+    if (!response.ok) {
+      console.warn(`⚠️ Historical FX API returned ${response.status} for ${dateStr}`);
+      
+      // If weekend/holiday, try previous business day
+      if (response.status === 404 || response.status === 400) {
+        const previousDay = new Date(date);
+        previousDay.setDate(previousDay.getDate() - 1);
+        return fetchHistoricalExchangeRatesForDate(previousDay);
+      }
+      
+      throw new Error(`API returned ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const rates: Record<string, number> = {
+      USD: 1.0, // Base currency
+      ...data.rates
+    };
+    
+    console.log(`✅ Historical FX rates for ${dateStr}:`, rates);
+    return rates;
+  } catch (error) {
+    console.warn(`⚠️ Failed to fetch historical rates for ${date.toISOString()}, using fallback:`, error);
+    return FALLBACK_RATES;
+  }
+};
+
+/**
  * Check if all dates in range are cached
  */
 const checkIfAllDatesAreCached = (

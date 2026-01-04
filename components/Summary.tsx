@@ -127,7 +127,7 @@ export const Summary: React.FC<SummaryProps> = ({
     return convertCurrencySync(value, fromCurrency, toCurrency, exchangeRates);
   };
 
-  // P4 CHANGE: Calculate totals from assets (converting each to display currency)
+  // P1.1B CHANGE: Calculate FX-adjusted totals from assets
   const { convertedTotalValue, convertedCostBasis, convertedPnL, formattedTotal, formattedPnL, pnlPercent } = useMemo(() => {
     if (!ratesLoaded) {
       // Return placeholder values while rates are loading
@@ -147,12 +147,29 @@ export const Summary: React.FC<SummaryProps> = ({
 
     for (const asset of assets) {
       const assetCurrency = asset.currency || detectCurrencyFromTicker(asset.ticker);
+      
+      // Current value (simple)
       const assetValue = asset.quantity * asset.currentPrice;
-      const assetCostBasis = asset.totalCostBasis;
+      
+      // P1.1B CHANGE: FX-adjusted cost basis
+      // Sum up FX-adjusted costs from each transaction
+      let assetFxAdjustedCost = 0;
+      
+      for (const tx of asset.transactions) {
+        // If transaction has historical FX rates, use them
+        if (tx.exchangeRateAtPurchase && tx.purchaseCurrency && tx.exchangeRateAtPurchase[assetCurrency]) {
+          // Convert cost from purchase currency to asset currency using historical rate
+          const costInAssetCurrency = tx.totalCost * tx.exchangeRateAtPurchase[assetCurrency];
+          assetFxAdjustedCost += costInAssetCurrency;
+        } else {
+          // Fallback: use transaction cost as-is (backward compatible)
+          assetFxAdjustedCost += tx.totalCost;
+        }
+      }
 
-      // Convert to display currency
+      // Convert both to display currency
       const valueInDisplay = convertToDisplayCurrency(assetValue, assetCurrency, displayCurrency);
-      const costInDisplay = convertToDisplayCurrency(assetCostBasis, assetCurrency, displayCurrency);
+      const costInDisplay = convertToDisplayCurrency(assetFxAdjustedCost, assetCurrency, displayCurrency);
 
       totalValue += valueInDisplay;
       totalCostBasis += costInDisplay;
@@ -272,15 +289,24 @@ export const Summary: React.FC<SummaryProps> = ({
         const costStack: Record<string, number> = {};
         
         assets.forEach(asset => {
-            // A. Calculate Cumulative Quantity at time t
+            // A. Calculate Cumulative Quantity and FX-Adjusted Cost at time t
             let qtyAtTime = 0;
-            let costAtTime = 0;
+            let fxAdjustedCostAtTime = 0;
             
             asset.transactions.forEach(tx => {
                const txTime = new Date(tx.date).getTime();
                if (txTime <= t) {
                    qtyAtTime += tx.quantity;
-                   costAtTime += tx.totalCost;
+                   
+                   // P1.1B CHANGE: Use FX-adjusted cost if available
+                   const assetCurrency = asset.currency || detectCurrencyFromTicker(asset.ticker);
+                   if (tx.exchangeRateAtPurchase && tx.purchaseCurrency && tx.exchangeRateAtPurchase[assetCurrency]) {
+                     // Convert from purchase currency to asset currency using historical rate
+                     fxAdjustedCostAtTime += tx.totalCost * tx.exchangeRateAtPurchase[assetCurrency];
+                   } else {
+                     // Fallback: use transaction cost as-is
+                     fxAdjustedCostAtTime += tx.totalCost;
+                   }
                }
             });
 
@@ -294,10 +320,10 @@ export const Summary: React.FC<SummaryProps> = ({
             // Detect currency from ticker/asset
             const assetCurrency = asset.currency || detectCurrencyFromTicker(asset.ticker);
             
-            // Convert cost to display currency using HISTORICAL rate for date t
+            // P1.1B CHANGE: Convert FX-adjusted cost to display currency using HISTORICAL rate for date t
             const costDate = new Date(t);
             const costInDisplay = convertCurrencySyncHistorical(
-              costAtTime,
+              fxAdjustedCostAtTime,
               assetCurrency,
               displayCurrency,
               costDate,

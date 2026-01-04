@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot, TransactionTag, Currency } from './types';
 import { fetchCryptoPrice, fetchAssetHistory, delay } from './services/geminiService';
-import { fetchExchangeRates } from './services/currencyService';
+import { fetchExchangeRates, fetchHistoricalExchangeRatesForDate } from './services/currencyService'; // P1.1B CHANGE: Added fetchHistoricalExchangeRatesForDate
 import { AssetCard } from './components/AssetCard';
 import { AddAssetForm } from './components/AddAssetForm';
 import { Summary } from './components/Summary';
@@ -225,8 +225,20 @@ const App: React.FC = () => {
     }
   };
 
+  // P1.1B CHANGE: Updated handleAddAsset to fetch and store historical FX rates
   const handleAddAsset = async (ticker: string, quantity: number, pricePerCoin: number, date: string, currency: Currency = 'USD', tag?: string) => {
     const totalCost = quantity * pricePerCoin;
+    
+    // P1.1B NEW: Fetch historical FX rates for the purchase date
+    let historicalRates: Record<Currency, number> | undefined;
+    try {
+      console.log(`💱 Fetching historical FX rates for purchase date: ${date}`);
+      historicalRates = await fetchHistoricalExchangeRatesForDate(new Date(date));
+      console.log(`✅ Historical FX rates fetched for ${date}:`, historicalRates);
+    } catch (error) {
+      console.warn(`⚠️ Failed to fetch historical FX rates for ${date}, transaction will proceed without them:`, error);
+    }
+    
     const newTx: Transaction = { 
       id: Math.random().toString(36).substr(2, 9), 
       type: 'BUY', 
@@ -235,7 +247,9 @@ const App: React.FC = () => {
       date, 
       totalCost,
       tag: tag || 'DCA', // Use provided tag or default to DCA
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      purchaseCurrency: currency, // P1.1B NEW: Store purchase currency
+      exchangeRateAtPurchase: historicalRates // P1.1B NEW: Store FX rates at purchase time
     };
     const existingAsset = assets.find(a => a.ticker === ticker);
     
