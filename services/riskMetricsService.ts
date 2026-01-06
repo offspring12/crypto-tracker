@@ -427,11 +427,10 @@ export function reconstructPortfolioHistory(
   }
 
   // 2. Generate timestamps based on ACTUAL PRICE DATA (trading days only)
-  // P1.2 FIX: Only use days where we have real price data to avoid artificial volatility
-  // from weekends/holidays with interpolated prices
+  // P1.2 BUGFIX: Only use days where ALL assets have real price data (intersection, not union)
+  // This prevents interpolated prices from causing beta calculation errors
 
   const oneDayMs = 24 * 60 * 60 * 1000;
-  const timestampSet = new Set<number>();
 
   // P1.2 FIX: Normalize startTime to start of day (00:00:00)
   const startDate = new Date(startTime);
@@ -441,8 +440,16 @@ export function reconstructPortfolioHistory(
   const nowDate = new Date(now);
   const normalizedNow = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
 
-  // Collect all unique timestamps from asset price histories
+  console.log(`🕒 [${period}] Time range check:`);
+  console.log(`   Now: ${new Date(now).toISOString()} → normalized: ${new Date(normalizedNow).toISOString()}`);
+  console.log(`   Start: ${new Date(startTime).toISOString()} → normalized: ${new Date(normalizedStart).toISOString()}`);
+
+  // P1.2 BUGFIX: Build timestamp sets for EACH asset separately
+  const assetTimestampSets: Set<number>[] = [];
+
   for (const asset of assets) {
+    const assetTimestamps = new Set<number>();
+
     if (asset.priceHistory && asset.priceHistory.length > 0) {
       for (const [priceTimestamp, _] of asset.priceHistory) {
         // Normalize to day boundary
@@ -451,14 +458,41 @@ export function reconstructPortfolioHistory(
 
         // Only include if within our time range
         if (normalizedTimestamp >= normalizedStart && normalizedTimestamp <= normalizedNow) {
-          timestampSet.add(normalizedTimestamp);
+          assetTimestamps.add(normalizedTimestamp);
         }
       }
     }
+
+    assetTimestampSets.push(assetTimestamps);
   }
 
-  // Convert to sorted array
-  let timestamps = Array.from(timestampSet).sort((a, b) => a - b);
+  // P1.2 BUGFIX: Use INTERSECTION of all asset timestamps (not union)
+  // This ensures we only use days where ALL assets have real price data
+  let timestamps: number[] = [];
+
+  if (assetTimestampSets.length > 0) {
+    // Start with first asset's timestamps
+    const commonTimestamps = new Set(assetTimestampSets[0]);
+
+    // Intersect with all other assets
+    for (let i = 1; i < assetTimestampSets.length; i++) {
+      const assetSet = assetTimestampSets[i];
+      for (const ts of commonTimestamps) {
+        if (!assetSet.has(ts)) {
+          commonTimestamps.delete(ts);
+        }
+      }
+    }
+
+    timestamps = Array.from(commonTimestamps).sort((a, b) => a - b);
+
+    console.log(`📊 [${period}] Portfolio timestamps: ${timestamps.length} common trading days (intersection of ${assets.length} assets)`);
+    console.log(`   Individual asset coverage before intersection:`);
+    assetTimestampSets.forEach((set, idx) => {
+      console.log(`   - ${assets[idx].ticker}: ${set.size} days`);
+    });
+    console.log(`   ✓ Using ${timestamps.length} common days where ALL assets have real prices`);
+  }
 
   // P1.2 FIX: For 30D/90D, take only the last N TRADING days
   if (maxTradingDays !== undefined && timestamps.length > maxTradingDays) {
@@ -1003,34 +1037,48 @@ function reconstructAssetValueHistory(
       continue;
     }
 
-    // Get price at this timestamp (same logic as portfolio reconstruction)
+    // P1.2 CRITICAL FIX: Use EXACT price lookup (no interpolation)
+    // Since portfolioTimestamps are the intersection of all assets' trading days,
+    // we know this timestamp MUST exist in the asset's price history
     let priceAtTime = asset.currentPrice;
 
     if (asset.priceHistory && asset.priceHistory.length > 0) {
       const history = asset.priceHistory;
 
       if (timestamp < history[0][0]) {
+        // Before first price - use first transaction price
         const sortedTxs = asset.transactions
           .slice()
           .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         priceAtTime = sortedTxs[0]?.pricePerCoin || asset.avgBuyPrice;
       } else if (timestamp >= history[history.length - 1][0]) {
+        // After last price - use current price
         priceAtTime = asset.currentPrice;
       } else {
-        const idx = history.findIndex(p => p[0] >= timestamp);
-        if (idx === 0) {
-          priceAtTime = history[0][1];
-        } else if (idx === -1) {
-          priceAtTime = history[history.length - 1][1];
+        // P1.2 CRITICAL: Find EXACT match (normalize both timestamps to day boundary)
+        const tsDate = new Date(timestamp);
+        const normalizedTimestamp = new Date(tsDate.getFullYear(), tsDate.getMonth(), tsDate.getDate()).getTime();
+
+        const exactMatch = history.find(p => {
+          const priceDate = new Date(p[0]);
+          const normalizedPrice = new Date(priceDate.getFullYear(), priceDate.getMonth(), priceDate.getDate()).getTime();
+          return normalizedPrice === normalizedTimestamp;
+        });
+
+        if (exactMatch) {
+          priceAtTime = exactMatch[1];
         } else {
-          const p1 = history[idx - 1];
-          const p2 = history[idx];
-          const span = p2[0] - p1[0];
-          if (span > 0) {
-            const progress = (timestamp - p1[0]) / span;
-            priceAtTime = p1[1] + (p2[1] - p1[1]) * progress;
+          // Should not happen with intersection timestamps, but fallback to nearest
+          console.warn(`⚠️ [${asset.ticker}] No exact price match at ${new Date(timestamp).toISOString()}`);
+          console.warn(`   Normalized timestamp: ${normalizedTimestamp}, looking for match in ${history.length} price points`);
+          console.warn(`   First 3 price timestamps: ${history.slice(0, 3).map(p => new Date(new Date(p[0]).toDateString()).getTime()).join(', ')}`);
+          const idx = history.findIndex(p => p[0] >= timestamp);
+          if (idx === 0) {
+            priceAtTime = history[0][1];
+          } else if (idx === -1) {
+            priceAtTime = history[history.length - 1][1];
           } else {
-            priceAtTime = p1[1];
+            priceAtTime = history[idx - 1][1]; // Use previous price (no interpolation)
           }
         }
       }
@@ -1072,13 +1120,18 @@ export function calculateBeta(
   portfolioHistory: Array<[number, number]>,
   displayCurrency: Currency,
   historicalRates: Record<string, Record<string, number>>,
-  exchangeRates: Record<string, number>
+  exchangeRates: Record<string, number>,
+  cashFlows: Array<[number, number]> // P1.2 FIX: Cash flows for adjustment
 ): number {
   if (portfolioHistory.length < 2) {
     return 1.0; // Default to 1.0 if insufficient data
   }
 
-  // P1.2 FIX: Reconstruct asset values at EXACT portfolio timestamps
+  console.log(`\n📈 Beta Calculation for ${asset.ticker}:`);
+  console.log(`   Portfolio history: ${portfolioHistory.length} points`);
+  console.log(`   Cash flows: ${cashFlows.length} events`);
+
+  // P1.2 FIX: Reconstruct asset value history at EXACT portfolio timestamps
   const portfolioTimestamps = portfolioHistory.map(([ts, _]) => ts);
   const assetValues = reconstructAssetValueHistory(
     asset,
@@ -1088,22 +1141,74 @@ export function calculateBeta(
     exchangeRates
   );
 
-  // Calculate returns (now guaranteed to be aligned!)
-  const portfolioValues = portfolioHistory.map(([_, val]) => val);
-  const assetReturns = calculateReturns(assetValues);
-  const portfolioReturns = calculateReturns(portfolioValues);
+  // P1.2 CRITICAL FIX: Use cash-flow-adjusted returns for BOTH asset and portfolio
+  // This is the same methodology used for portfolio volatility calculation
+  // We need to adjust for the asset's cash flows (its transactions)
 
-  // Calculate beta
+  // Build asset-specific cash flows
+  const assetCashFlows: Array<[number, number]> = [];
+  const assetCurrency = asset.currency || detectCurrencyFromTicker(asset.ticker);
+
+  for (const [timestamp, _] of portfolioHistory) {
+    let dailyCashFlow = 0;
+
+    // Check if this asset had transactions on this day
+    for (const tx of asset.transactions) {
+      const txTime = parseDateStringLocal(tx.date).getTime();
+      const txDate = new Date(txTime);
+      const normalizedTxTime = new Date(txDate.getFullYear(), txDate.getMonth(), txDate.getDate()).getTime();
+
+      if (normalizedTxTime === timestamp) {
+        // Convert transaction value to display currency
+        const txValueInNative = tx.quantity * tx.pricePerCoin;
+        const txValueInDisplay = convertCurrencySyncHistorical(
+          txValueInNative,
+          assetCurrency,
+          displayCurrency,
+          new Date(timestamp),
+          historicalRates,
+          exchangeRates
+        );
+        dailyCashFlow += txValueInDisplay;
+      }
+    }
+
+    if (dailyCashFlow !== 0) {
+      assetCashFlows.push([timestamp, dailyCashFlow]);
+    }
+  }
+
+  // Calculate cash-flow-adjusted returns for the asset
+  const assetReturns = calculateCashFlowAdjustedReturns(
+    portfolioHistory.map((p, i) => [p[0], assetValues[i]] as [number, number]),
+    assetCashFlows
+  );
+
+  // Calculate cash-flow-adjusted returns for the portfolio
+  const portfolioReturns = calculateCashFlowAdjustedReturns(portfolioHistory, cashFlows);
+
+  console.log(`   Asset cash flows: ${assetCashFlows.length} events`);
+  console.log(`   Asset returns (adjusted): ${assetReturns.length}`);
+  console.log(`   Portfolio returns (adjusted): ${portfolioReturns.length}`);
+
+  // Calculate beta using adjusted returns
   if (assetReturns.length !== portfolioReturns.length || assetReturns.length < 2) {
+    console.log(`   ⚠️ Return length mismatch or insufficient data`);
     return 1.0;
   }
 
   const cov = covariance(assetReturns, portfolioReturns);
   const portfolioVariance = Math.pow(standardDeviation(portfolioReturns), 2);
 
-  if (portfolioVariance === 0) return 1.0;
+  if (portfolioVariance === 0) {
+    console.log(`   ⚠️ Zero portfolio variance`);
+    return 1.0;
+  }
 
-  return cov / portfolioVariance;
+  const beta = cov / portfolioVariance;
+  console.log(`   ✅ Beta = ${beta.toFixed(4)} (cov=${cov.toFixed(6)}, var=${portfolioVariance.toFixed(6)})`);
+
+  return beta;
 }
 
 // ============================================================================
@@ -1243,11 +1348,16 @@ export async function calculateRiskAnalysis(
   // 4. Calculate asset-level metrics
   const assetMetrics: AssetRiskMetrics[] = [];
 
+  console.log(`\n🔍 Risk Contribution Calculation:`);
+  console.log(`   Portfolio Volatility: ${(volatility * 100).toFixed(2)}%`);
+  console.log(`   Weights: ${weights.map(w => (w * 100).toFixed(2) + '%').join(', ')}`);
+  console.log(`   Weight Sum: ${(weights.reduce((a, b) => a + b, 0) * 100).toFixed(2)}%`);
+
   for (let i = 0; i < assets.length; i++) {
     const asset = assets[i];
 
-    // Calculate beta with timestamp alignment
-    const beta = calculateBeta(asset, portfolioHistory, displayCurrency, historicalRates, exchangeRates);
+    // Calculate beta with cash-flow-adjusted returns
+    const beta = calculateBeta(asset, portfolioHistory, displayCurrency, historicalRates, exchangeRates, cashFlows);
 
     // Calculate asset volatility
     const assetTradingDays = getTradingDaysPerYear(asset.ticker);
@@ -1264,7 +1374,11 @@ export async function calculateRiskAnalysis(
     }
 
     // Calculate risk contribution using standard MCR
+    console.log(`\n   ${asset.ticker}:`);
+    console.log(`      Weight: ${(weights[i] * 100).toFixed(2)}%`);
+    console.log(`      Beta: ${beta.toFixed(4)}`);
     const riskContrib = calculateRiskContribution(weights[i], beta, volatility);
+    console.log(`      Risk Contribution: ${riskContrib.toFixed(2)}%`);
 
     // Determine risk rating
     const riskRating = getRiskRating(assetVol, VOLATILITY_THRESHOLDS);
@@ -1280,6 +1394,22 @@ export async function calculateRiskAnalysis(
       riskRating,
       dataPoints: asset.priceHistory?.length || 0
     });
+  }
+
+  // P1.2 FIX: Normalize risk contributions to sum to exactly 100%
+  // Due to empirical estimation and cash-flow adjustments, Σ(w_i × β_i) may not equal exactly 1.0
+  // Industry standard practice is to normalize the contributions proportionally
+  const totalRiskContrib = assetMetrics.reduce((sum, a) => sum + a.riskContribution, 0);
+  console.log(`\n🔍 Risk Contribution (before normalization): ${totalRiskContrib.toFixed(2)}%`);
+
+  if (totalRiskContrib > 0 && Math.abs(totalRiskContrib - 100) > 0.01) {
+    console.log(`   Normalizing risk contributions to sum to 100%...`);
+    const normalizationFactor = 100 / totalRiskContrib;
+    for (const asset of assetMetrics) {
+      asset.riskContribution *= normalizationFactor;
+    }
+    const normalizedTotal = assetMetrics.reduce((sum, a) => sum + a.riskContribution, 0);
+    console.log(`   ✅ After normalization: ${normalizedTotal.toFixed(2)}%`);
   }
 
   // 5. Assemble final analysis

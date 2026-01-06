@@ -204,11 +204,11 @@ export const RiskMetrics: React.FC<RiskMetricsProps> = ({
                     <thead className="text-slate-500 border-b border-slate-700">
                       <tr>
                         <th className="text-left py-2 px-2">Asset</th>
-                        <th className="text-right py-2 px-2">Weight</th>
-                        <th className="text-right py-2 px-2">Beta</th>
-                        <th className="text-right py-2 px-2">Volatility</th>
-                        <th className="text-right py-2 px-2">Risk Contrib</th>
-                        <th className="text-center py-2 px-2">Rating</th>
+                        <th className="text-right py-2 px-2" title="Percentage of total portfolio value">Weight</th>
+                        <th className="text-right py-2 px-2" title="Beta measures correlation with portfolio. 1.0 = moves with portfolio, >1 = more volatile than portfolio, <1 = less volatile, negative = moves opposite to portfolio.">Beta</th>
+                        <th className="text-right py-2 px-2" title="Annualized volatility of the asset (standard deviation of returns)">Volatility</th>
+                        <th className="text-right py-2 px-2" title="Percentage of total portfolio risk contributed by this asset. Sum of all risk contributions should equal 100%.">Risk Contrib</th>
+                        <th className="text-center py-2 px-2" title="Risk rating based on asset volatility">Rating</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-700/30">
