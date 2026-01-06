@@ -240,10 +240,17 @@ export const fetchHistoricalExchangeRates = async (
  * P1.1B NEW: Fetch historical exchange rates for a SINGLE date
  * Returns rates relative to USD for that specific date
  * Uses frankfurter.app API which is free and supports historical data
+ *
+ * P1.2 FIX: Format date in local timezone to avoid UTC conversion shifting the date
  */
 export const fetchHistoricalExchangeRatesForDate = async (date: Date): Promise<Record<string, number>> => {
   try {
-    const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD format
+    // P1.2 FIX: Format date in local timezone (not UTC) to avoid date shift
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+
     console.log(`💱 Fetching historical FX rates for ${dateStr}...`);
 
     // frankfurter.app provides historical rates with USD as base
@@ -311,6 +318,9 @@ const checkIfAllDatesAreCached = (
  * 2. Source → USD (inverse rate calculation)
  * 3. Cross-currency via USD (combine inverse + direct)
  */
+// P1.2: Suppress repetitive fallback warnings (weekly FX data causes noise)
+let fallbackWarningShown = false;
+
 export const convertCurrencySyncHistorical = (
   amount: number,
   fromCurrency: string,
@@ -320,70 +330,63 @@ export const convertCurrencySyncHistorical = (
   fallbackCurrentRates: Record<string, number>
 ): number => {
   if (fromCurrency === toCurrency) {
-    console.log(`💱 [${date.toISOString().split('T')[0]}] ${fromCurrency} → ${toCurrency}: Same currency, returning ${amount}`);
-    return amount;
+    return amount; // P1.2: Removed verbose logging for same-currency
   }
-  
+
   const dateStr = date.toISOString().split('T')[0];
   let ratesForDate = historicalRates[dateStr];
-  
+
   // 🔧 FIX: Weekend/Holiday fallback - use previous day's rate
   if (!ratesForDate) {
-    console.warn(`⚠️ No historical rates for ${dateStr}, trying previous days...`);
-    
-    // Try up to 7 days back (to handle long weekends)
+    // P1.2: Only show warning once per session to reduce console noise
+    if (!fallbackWarningShown) {
+      console.log(`ℹ️ Historical FX data is weekly - using nearest available rate (within 7 days)`);
+      fallbackWarningShown = true;
+    }
+
+    // Try up to 7 days back (to handle long weekends and weekly data)
     for (let daysBack = 1; daysBack <= 7; daysBack++) {
       const prevDate = new Date(date);
       prevDate.setDate(prevDate.getDate() - daysBack);
       const prevDateStr = prevDate.toISOString().split('T')[0];
-      
+
       if (historicalRates[prevDateStr]) {
-        console.log(`   ✅ Using rates from ${prevDateStr} (${daysBack} days back)`);
         ratesForDate = historicalRates[prevDateStr];
         break;
       }
     }
-    
+
     // If still no rates, use current rates
     if (!ratesForDate) {
-      console.warn(`   ❌ No historical rates found, using current rates as fallback`);
+      console.warn(`⚠️ No historical rates found for ${dateStr}, using current rates as fallback`);
       return convertCurrencySync(amount, fromCurrency, toCurrency, fallbackCurrentRates);
     }
   }
-  
-  console.log(`💱 [${dateStr}] Converting ${amount} ${fromCurrency} → ${toCurrency}`);
-  console.log(`   Available rates:`, Object.keys(ratesForDate).join(', '));
-  
+
+  // P1.2: Removed verbose conversion logging - only log errors
+
   // Case 1: USD → Target currency (direct multiplication)
   if (fromCurrency === 'USD' && ratesForDate[toCurrency] !== undefined) {
-    const result = amount * ratesForDate[toCurrency];
-    console.log(`   ✅ Case 1 (USD→Target): ${amount} * ${ratesForDate[toCurrency]} = ${result}`);
-    return result;
+    return amount * ratesForDate[toCurrency];
   }
-  
+
   // Case 2: Source → USD (inverse rate)
   if (toCurrency === 'USD' && ratesForDate[fromCurrency] !== undefined) {
     const inverseRate = 1 / ratesForDate[fromCurrency];
-    const result = amount * inverseRate;
-    console.log(`   ✅ Case 2 (Source→USD inverse): ${amount} * (1/${ratesForDate[fromCurrency]}) = ${amount} * ${inverseRate.toFixed(6)} = ${result}`);
-    return result;
+    return amount * inverseRate;
   }
-  
+
   // Case 3: Cross-currency via USD (e.g., CHF → EUR)
   if (ratesForDate[fromCurrency] !== undefined && ratesForDate[toCurrency] !== undefined) {
     // Step 1: Source → USD (inverse)
     const sourceToUsd = 1 / ratesForDate[fromCurrency];
     const amountInUSD = amount * sourceToUsd;
-    
+
     // Step 2: USD → Target (direct)
-    const result = amountInUSD * ratesForDate[toCurrency];
-    
-    console.log(`   ✅ Case 3 (Cross-currency): ${amount} * (1/${ratesForDate[fromCurrency]}) * ${ratesForDate[toCurrency]} = ${result}`);
-    return result;
+    return amountInUSD * ratesForDate[toCurrency];
   }
-  
+
   // Fallback to current rates if no historical path found
   console.warn(`⚠️ [${dateStr}] No valid conversion path for ${fromCurrency}→${toCurrency}, using current rates`);
-  console.warn(`   Missing rates: ${fromCurrency}=${ratesForDate[fromCurrency]}, ${toCurrency}=${ratesForDate[toCurrency]}`);
   return convertCurrencySync(amount, fromCurrency, toCurrency, fallbackCurrentRates);
 };

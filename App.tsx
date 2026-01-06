@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot, TransactionTag, Currency } from './types';
 import { fetchCryptoPrice, fetchAssetHistory, delay } from './services/geminiService';
-import { fetchExchangeRates, fetchHistoricalExchangeRatesForDate } from './services/currencyService'; // P1.1B CHANGE: Added fetchHistoricalExchangeRatesForDate
+import { fetchExchangeRates, fetchHistoricalExchangeRatesForDate, fetchHistoricalExchangeRates } from './services/currencyService'; // P1.1B CHANGE: Added fetchHistoricalExchangeRatesForDate
 import { AssetCard } from './components/AssetCard';
 import { AddAssetForm } from './components/AddAssetForm';
 import { Summary } from './components/Summary';
 import { TagAnalytics } from './components/TagAnalytics';
+import { RiskMetrics } from './components/RiskMetrics';
 import { ApiKeySettings } from './components/ApiKeySettings';
 import { PortfolioManager } from './components/PortfolioManager';
 import { Wallet, Download, Upload, Settings, Key, FolderOpen, Plus, Check } from 'lucide-react';
+import { testPhase1 } from './services/riskMetricsService'; // P1.2 TEST IMPORT
 
 // Portfolio colors for visual distinction
 const PORTFOLIO_COLORS = [
@@ -105,6 +107,9 @@ const App: React.FC = () => {
   const [displayCurrency, setDisplayCurrency] = useState<Currency>('USD');
   const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
 
+  // P1.2 NEW: Historical exchange rates for risk metrics
+  const [historicalRates, setHistoricalRates] = useState<Record<string, Record<string, number>>>({});
+
   // Get active portfolio
   const activePortfolio = portfolios.find(p => p.id === activePortfolioId) || portfolios[0];
   const assets = activePortfolio?.assets || [];
@@ -155,6 +160,93 @@ const App: React.FC = () => {
     };
     loadRates();
   }, []);
+
+  // P1.2: Load historical exchange rates for risk metrics
+  useEffect(() => {
+    if (assets.length > 0 && Object.keys(exchangeRates).length > 0) {
+      const loadHistoricalRates = async () => {
+        // Find earliest transaction for historical rates
+        let earliestDate = new Date();
+        assets.forEach(asset => {
+          asset.transactions.forEach(tx => {
+            const txDate = new Date(tx.date);
+            if (txDate < earliestDate) earliestDate = txDate;
+          });
+        });
+
+        const rates = await fetchHistoricalExchangeRates(earliestDate, new Date());
+        setHistoricalRates(rates);
+
+        // P1.2 TEST: Expose test function to browser console (temporary)
+        (window as any).testRiskMetrics = () => {
+          testPhase1(assets, displayCurrency, exchangeRates, rates);
+        };
+
+        // P1.2 DEBUG: Expose price history inspector
+        (window as any).inspectPrices = (ticker: string) => {
+          const asset = assets.find(a => a.ticker.toUpperCase() === ticker.toUpperCase());
+          if (!asset) {
+            console.error(`❌ Asset ${ticker} not found`);
+            return;
+          }
+
+          console.log(`📊 Price History for ${ticker}:`);
+          console.log(`   Current Price: ${asset.currentPrice} ${asset.currency}`);
+          console.log(`   History Length: ${asset.priceHistory?.length || 0} data points`);
+
+          if (asset.priceHistory && asset.priceHistory.length > 0) {
+            // Show first 10 and last 10 data points
+            console.log('\n📈 First 10 data points:');
+            console.table(asset.priceHistory.slice(0, 10).map(([ts, price]) => ({
+              date: new Date(ts).toISOString().split('T')[0],
+              timestamp: ts,
+              price: price.toFixed(2)
+            })));
+
+            console.log('\n📈 Last 10 data points:');
+            console.table(asset.priceHistory.slice(-10).map(([ts, price]) => ({
+              date: new Date(ts).toISOString().split('T')[0],
+              timestamp: ts,
+              price: price.toFixed(2)
+            })));
+
+            // Export full data for manual calculation
+            console.log('\n💾 Full price history (copy this for Excel/manual calculation):');
+            const csvData = asset.priceHistory.map(([ts, price]) => {
+              const d = new Date(ts);
+              const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              return `${dateStr},${price}`;
+            }).join('\n');
+            console.log('Date,Price');
+            console.log(csvData);
+
+            // Calculate basic statistics
+            const prices = asset.priceHistory.map(([_, p]) => p);
+            const returns = [];
+            for (let i = 1; i < prices.length; i++) {
+              returns.push((prices[i] - prices[i-1]) / prices[i-1]);
+            }
+            const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length;
+            const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length;
+            const stdDev = Math.sqrt(variance);
+            const annualizedVol = stdDev * Math.sqrt(252); // 252 trading days for stocks
+
+            console.log('\n📊 Quick Statistics:');
+            console.log(`   Daily returns: ${returns.length} days`);
+            console.log(`   Avg daily return: ${(avgReturn * 100).toFixed(4)}%`);
+            console.log(`   Daily volatility (std dev): ${(stdDev * 100).toFixed(4)}%`);
+            console.log(`   Annualized volatility: ${(annualizedVol * 100).toFixed(2)}%`);
+          }
+
+          return asset.priceHistory;
+        };
+
+        console.log('🧪 P1.2 TEST: Type testRiskMetrics() in console to test Phase 1 implementation');
+        console.log('📊 DEBUG: Type inspectPrices("NESN.SW") to see price history and calculate volatility');
+      };
+      loadHistoricalRates();
+    }
+  }, [assets, exchangeRates, displayCurrency]);
 
   // Save portfolios to localStorage
   useEffect(() => {
@@ -228,23 +320,30 @@ const App: React.FC = () => {
   // P1.1B CHANGE: Updated handleAddAsset to fetch and store historical FX rates
   const handleAddAsset = async (ticker: string, quantity: number, pricePerCoin: number, date: string, currency: Currency = 'USD', tag?: string) => {
     const totalCost = quantity * pricePerCoin;
-    
+
+    // P1.2 FIX: Parse date in local timezone to avoid timezone conversion issues
+    // Input date format: "YYYY-MM-DD" (e.g., "2025-01-05")
+    // Problem: new Date("2025-01-05") creates UTC midnight, which becomes previous day in UTC+ timezones
+    // Solution: Parse components and create local midnight explicitly
+    const [year, month, day] = date.split('-').map(Number);
+    const localDate = new Date(year, month - 1, day); // month is 0-indexed in JavaScript Date
+
     // P1.1B NEW: Fetch historical FX rates for the purchase date
     let historicalRates: Record<Currency, number> | undefined;
     try {
       console.log(`💱 Fetching historical FX rates for purchase date: ${date}`);
-      historicalRates = await fetchHistoricalExchangeRatesForDate(new Date(date));
+      historicalRates = await fetchHistoricalExchangeRatesForDate(localDate);
       console.log(`✅ Historical FX rates fetched for ${date}:`, historicalRates);
     } catch (error) {
       console.warn(`⚠️ Failed to fetch historical FX rates for ${date}, transaction will proceed without them:`, error);
     }
-    
-    const newTx: Transaction = { 
-      id: Math.random().toString(36).substr(2, 9), 
-      type: 'BUY', 
-      quantity, 
-      pricePerCoin, 
-      date, 
+
+    const newTx: Transaction = {
+      id: Math.random().toString(36).substr(2, 9),
+      type: 'BUY',
+      quantity,
+      pricePerCoin,
+      date,
       totalCost,
       tag: tag || 'DCA', // Use provided tag or default to DCA
       createdAt: new Date().toISOString(),
@@ -615,12 +714,20 @@ const App: React.FC = () => {
         />
         
         {/* P1.1 NEW: Add TagAnalytics component */}
-        <TagAnalytics 
+        <TagAnalytics
           assets={assets}
           displayCurrency={displayCurrency}
           exchangeRates={exchangeRates}
         />
-        
+
+        {/* P1.2 NEW: Add RiskMetrics component */}
+        <RiskMetrics
+          assets={assets}
+          displayCurrency={displayCurrency}
+          exchangeRates={exchangeRates}
+          historicalRates={historicalRates}
+        />
+
         <AddAssetForm onAdd={handleAddAsset} isGlobalLoading={isLoading} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {assets.map(asset => (
