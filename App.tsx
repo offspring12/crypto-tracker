@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot, TransactionTag, Currency } from './types';
 import { fetchCryptoPrice, fetchAssetHistory, delay } from './services/geminiService';
-import { fetchExchangeRates, fetchHistoricalExchangeRatesForDate, fetchHistoricalExchangeRates } from './services/currencyService'; // P1.1B CHANGE: Added fetchHistoricalExchangeRatesForDate
+import { fetchExchangeRates, fetchHistoricalExchangeRatesForDate, fetchHistoricalExchangeRates, convertCurrencySync } from './services/currencyService'; // P1.1B CHANGE: Added fetchHistoricalExchangeRatesForDate
 import { AssetCard } from './components/AssetCard';
 import { AddAssetForm } from './components/AddAssetForm';
 import { Summary } from './components/Summary';
@@ -9,6 +9,9 @@ import { TagAnalytics } from './components/TagAnalytics';
 import { RiskMetrics } from './components/RiskMetrics';
 import { ApiKeySettings } from './components/ApiKeySettings';
 import { PortfolioManager } from './components/PortfolioManager';
+import { SellModal } from './components/SellModal';
+import { ClosedPositionsPanel } from './components/ClosedPositionsPanel';
+import { calculateRealizedPnL, createOrUpdateCashPosition, detectAssetNativeCurrency } from './services/portfolioService';
 import { Wallet, Download, Upload, Settings, Key, FolderOpen, Plus, Check } from 'lucide-react';
 import { testPhase1 } from './services/riskMetricsService'; // P1.2 TEST IMPORT
 
@@ -36,6 +39,7 @@ const migrateToPortfolios = (): Portfolio[] => {
       name: 'Main Portfolio',
       color: PORTFOLIO_COLORS[0],
       assets: [],
+      closedPositions: [], // P2: Trading Lifecycle
       history: [],
       settings: {},
       createdAt: new Date().toISOString()
@@ -51,6 +55,7 @@ const migrateToPortfolios = (): Portfolio[] => {
     name: 'Main Portfolio',
     color: PORTFOLIO_COLORS[0],
     assets,
+    closedPositions: [], // P2: Trading Lifecycle
     history,
     settings: {},
     createdAt: new Date().toISOString()
@@ -68,6 +73,7 @@ const migrateToPortfolios = (): Portfolio[] => {
 const migrateTransactionTags = (portfolios: Portfolio[]): Portfolio[] => {
   return portfolios.map(portfolio => ({
     ...portfolio,
+    closedPositions: portfolio.closedPositions || [], // P2: Add closedPositions if missing
     assets: portfolio.assets.map(asset => ({
       ...asset,
       assetType: asset.assetType || 'CRYPTO', // Default to CRYPTO
@@ -101,7 +107,19 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPortfolioManagerOpen, setIsPortfolioManagerOpen] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [sellModalAsset, setSellModalAsset] = useState<Asset | null>(null); // P2: Sell modal state
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // P2: Undo notification state
+  const [undoNotification, setUndoNotification] = useState<{
+    visible: boolean;
+    sellTransactionId: string;
+    ticker: string;
+    quantity: number;
+    proceedsCurrency: string;
+    countdown: number;
+  } | null>(null);
+  const undoTimerRef = useRef<number | null>(null);
 
   // P1.1 CHANGE: Lift displayCurrency and exchangeRates to App level
   const [displayCurrency, setDisplayCurrency] = useState<Currency>('USD');
@@ -133,13 +151,19 @@ const App: React.FC = () => {
       totalCostBasis: 0, // Will be calculated in Summary.tsx
       totalPnL: 0, // Will be calculated in Summary.tsx
       totalPnLPercent: 0, // Will be calculated in Summary.tsx
+      // P2: Trading Lifecycle - Split P&L (calculated in Summary.tsx)
+      unrealizedPnL: 0,
+      unrealizedPnLPercent: 0,
+      realizedPnL: 0,
+      realizedPnLPercent: 0,
       assetCount: assets.length,
-      lastGlobalUpdate: assets.reduce((latest, a) => 
-        a.lastUpdated > latest ? a.lastUpdated : latest, 
+      closedPositionCount: activePortfolio?.closedPositions?.length || 0,
+      lastGlobalUpdate: assets.reduce((latest, a) =>
+        a.lastUpdated > latest ? a.lastUpdated : latest,
         assets[0]?.lastUpdated || null
       )
     };
-  }, [assets]);
+  }, [assets, activePortfolio?.closedPositions]);
 
   useEffect(() => {
     const checkApiKey = () => {
@@ -160,6 +184,35 @@ const App: React.FC = () => {
     };
     loadRates();
   }, []);
+
+  // P2: Cleanup undo timer on unmount
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) {
+        window.clearInterval(undoTimerRef.current);
+      }
+    };
+  }, []);
+
+  // P2: Handle undo countdown
+  useEffect(() => {
+    if (undoNotification?.visible && undoNotification.countdown > 0) {
+      const timer = window.setInterval(() => {
+        setUndoNotification(prev => {
+          if (!prev || prev.countdown <= 1) {
+            return null; // Auto-dismiss
+          }
+          return { ...prev, countdown: prev.countdown - 1 };
+        });
+      }, 1000);
+
+      undoTimerRef.current = timer;
+
+      return () => {
+        window.clearInterval(timer);
+      };
+    }
+  }, [undoNotification?.visible, undoNotification?.countdown]);
 
   // P1.2: Load historical exchange rates for risk metrics
   useEffect(() => {
@@ -421,18 +474,602 @@ const App: React.FC = () => {
     }
   };
 
+  // P2 HELPER: Recursively find all assets in the transaction chain
+  const findTransactionChain = (ticker: string, visited = new Set<string>()): Array<{ ticker: string; soldFor: string; asset: Asset; tx: Transaction }> => {
+    if (visited.has(ticker)) return []; // Prevent infinite loops
+    visited.add(ticker);
+
+    const chain: Array<{ ticker: string; soldFor: string; asset: Asset; tx: Transaction }> = [];
+
+    // Find all SELL transactions FROM this ticker
+    assets.forEach(asset => {
+      const assetTicker = asset.ticker.toUpperCase().split(' ')[0];
+      if (assetTicker === ticker.toUpperCase()) {
+        const sellTxs = asset.transactions.filter(tx => tx.type === 'SELL');
+        sellTxs.forEach(tx => {
+          if (tx.proceedsCurrency) {
+            const proceedsTicker = tx.proceedsCurrency.toUpperCase().split(' ')[0];
+            chain.push({ ticker: asset.ticker, soldFor: tx.proceedsCurrency, asset, tx });
+
+            // Recursively find subsequent sales
+            const subChain = findTransactionChain(proceedsTicker, visited);
+            chain.push(...subChain);
+          }
+        });
+      }
+    });
+
+    return chain;
+  };
+
+  // P2: Handle deleting an entire asset (check if it's proceeds from a sell)
+  const handleRemoveAsset = (assetId: string) => {
+    const assetToDelete = assets.find(a => a.id === assetId);
+    if (!assetToDelete) return;
+
+    console.log('🗑️ Attempting to delete asset:', assetToDelete.ticker, 'ID:', assetId);
+
+    // P2: Check if this asset is proceeds from a sell transaction
+    // Look for SELL transactions in other assets where proceedsCurrency matches this asset's ticker
+    const sellTransactionsForThisAsset: Array<{ asset: Asset; tx: Transaction }> = [];
+
+    assets.forEach(asset => {
+      asset.transactions.forEach(tx => {
+        if (tx.type === 'SELL' && tx.proceedsCurrency) {
+          console.log('  Found SELL tx:', tx.proceedsCurrency, 'vs', assetToDelete.ticker);
+          // Match by ticker (handle cases like "USDT" vs "USDT (STABLECOIN)")
+          const proceedsTicker = tx.proceedsCurrency.toUpperCase().split(' ')[0]; // Get first part
+          const assetTicker = assetToDelete.ticker.toUpperCase().split(' ')[0];
+
+          if (proceedsTicker === assetTicker) {
+            console.log('  ✅ MATCH! Adding to sellTransactionsForThisAsset');
+            sellTransactionsForThisAsset.push({ asset, tx });
+          }
+        }
+      });
+    });
+
+    console.log('📊 Found', sellTransactionsForThisAsset.length, 'sell transactions for this asset');
+
+    if (sellTransactionsForThisAsset.length > 0) {
+      // This asset came from sell transactions - check if it's been used in subsequent sales
+      const sellList = sellTransactionsForThisAsset
+        .map(({ asset, tx }) => `  • ${tx.quantity} ${asset.ticker} sold on ${new Date(tx.date).toLocaleDateString()}`)
+        .join('\n');
+
+      // P2 FIX: Check for FULL transaction chain (e.g., BTC→ETH→SOL)
+      const assetTickerBase = assetToDelete.ticker.toUpperCase().split(' ')[0];
+      const fullChain = findTransactionChain(assetTickerBase);
+
+      console.log('🔍 Checking for transaction chain from', assetToDelete.ticker);
+      console.log('  Found chain of length:', fullChain.length);
+      if (fullChain.length > 0) {
+        console.log('  ⚠️ Full chain:', fullChain.map(c => `${c.ticker}→${c.soldFor}`).join(', '));
+      }
+
+      if (fullChain.length > 0) {
+        // Can't reverse - this position has been used in subsequent sales
+        let errorMessage = `❌ Cannot Delete: "${assetToDelete.ticker}" is part of a transaction chain:\n\n`;
+
+        // Build the chain visualization
+        const chainVisualization = [assetToDelete.ticker];
+        fullChain.forEach(c => {
+          chainVisualization.push(c.soldFor);
+        });
+        errorMessage += `  ${chainVisualization.join(' → ')}\n\n`;
+
+        errorMessage += `Transactions in this chain:\n`;
+        fullChain.forEach(c => {
+          errorMessage += `  • ${c.tx.quantity} ${c.ticker} sold for ${c.soldFor} on ${new Date(c.tx.date).toLocaleDateString()}\n`;
+        });
+
+        errorMessage += `\n⚠️ Deleting this position would corrupt your P&L calculations and transaction history.\n\n`;
+        errorMessage += `To delete "${assetToDelete.ticker}", you must first reverse the sales in ORDER:\n`;
+
+        // Show the order of deletions (reverse order)
+        for (let i = fullChain.length - 1; i >= 0; i--) {
+          const step = fullChain.length - i;
+          const proceedsTicker = fullChain[i].soldFor.split(' ')[0];
+          errorMessage += `${step}. Delete or reverse the ${fullChain[i].ticker}→${proceedsTicker} sale\n`;
+        }
+        errorMessage += `${fullChain.length + 1}. Then you can delete "${assetToDelete.ticker}"\n\n`;
+        errorMessage += `This ensures your transaction history remains consistent.`;
+
+        alert(errorMessage);
+        return;
+      }
+
+      // No subsequent sales - safe to reverse
+      const confirmed = window.confirm(
+        `⚠️ Warning: "${assetToDelete.ticker}" is proceeds from the following sell transaction(s):\n\n` +
+        `${sellList}\n\n` +
+        `Deleting this position will REVERSE these sales:\n` +
+        `- The sell transactions will be deleted\n` +
+        `- The sold assets will be restored to your holdings\n` +
+        `- Closed positions will be removed\n` +
+        `- P&L calculations will be recalculated\n\n` +
+        `Do you want to continue and reverse these sales?`
+      );
+
+      if (!confirmed) return;
+
+      // Reverse all the sell transactions
+      updateActivePortfolio(portfolio => {
+        console.log('🔄 Starting reversal process');
+        console.log('  Portfolio has', portfolio.assets.length, 'assets');
+        console.log('  Deleting asset:', assetId);
+
+        let updatedAssets = portfolio.assets.filter(a => a.id !== assetId);
+        console.log('  After filtering, have', updatedAssets.length, 'assets');
+
+        let updatedClosedPositions = [...(portfolio.closedPositions || [])];
+
+        sellTransactionsForThisAsset.forEach(({ asset, tx }) => {
+          console.log('  🔄 Reversing SELL transaction:', tx.id, 'from', asset.ticker);
+          console.log('     Sold quantity:', tx.quantity, asset.ticker);
+
+          // Check if the asset still exists
+          const assetStillExists = updatedAssets.find(a => a.id === asset.id);
+          console.log('     Asset still in portfolio?', !!assetStillExists);
+
+          // Remove the SELL transaction
+          let filteredTxs = asset.transactions.filter(t => t.id !== tx.id);
+          console.log('     Transactions before:', asset.transactions.length, '-> after:', filteredTxs.length);
+
+          // P2: When reversing a SELL, we need to restore both quantity AND cost basis
+          // Find the closed positions for this sell to get the original BUY transactions
+          const relatedClosedPositions = (portfolio.closedPositions || []).filter(
+            cp => cp.sellTransactionId === tx.id
+          );
+
+          console.log('     Found', relatedClosedPositions.length, 'closed positions to reverse');
+
+          // Recreate the BUY transactions that were consumed by FIFO
+          relatedClosedPositions.forEach(cp => {
+            // Check if this BUY transaction was partially consumed or fully consumed
+            const existingBuyTx = filteredTxs.find(t => t.id === cp.buyTransactionId);
+
+            if (existingBuyTx) {
+              // Partial consumption - add back the consumed quantity
+              console.log('       Restoring partial BUY:', cp.entryQuantity, 'to tx', cp.buyTransactionId);
+              filteredTxs = filteredTxs.map(t =>
+                t.id === cp.buyTransactionId
+                  ? {
+                      ...t,
+                      quantity: t.quantity + cp.entryQuantity,
+                      totalCost: t.totalCost + cp.entryCostBasis
+                    }
+                  : t
+              );
+            } else {
+              // Full consumption - recreate the BUY transaction
+              console.log('       Recreating full BUY:', cp.entryQuantity, '@', cp.entryPrice);
+              const recreatedBuyTx: Transaction = {
+                id: cp.buyTransactionId,
+                type: 'BUY',
+                quantity: cp.entryQuantity,
+                pricePerCoin: cp.entryPrice,
+                date: cp.entryDate,
+                totalCost: cp.entryCostBasis,
+                tag: cp.entryTag || 'DCA',
+                createdAt: new Date().toISOString(),
+                purchaseCurrency: cp.entryCurrency as Currency,
+                exchangeRateAtPurchase: undefined
+              };
+              filteredTxs.push(recreatedBuyTx);
+            }
+          });
+
+          // Recalculate from the restored transactions
+          const buyTxs = filteredTxs.filter(t => t.type === 'BUY');
+          const newQty = buyTxs.reduce((sum, t) => sum + t.quantity, 0);
+          const newCost = buyTxs.reduce((sum, t) => sum + t.totalCost, 0);
+
+          console.log('     Restored quantity:', newQty, '(from', buyTxs.length, 'BUY transactions)');
+          console.log('     Restored cost basis:', newCost);
+
+          // Update the asset
+          const assetFound = updatedAssets.some(a => a.id === asset.id);
+          console.log('     Can find asset to update?', assetFound);
+
+          updatedAssets = updatedAssets.map(a =>
+            a.id === asset.id
+              ? {
+                  ...a,
+                  transactions: filteredTxs,
+                  quantity: newQty,
+                  totalCostBasis: newCost,
+                  avgBuyPrice: newQty > 0 ? newCost / newQty : 0
+                }
+              : a
+          );
+
+          // Remove closed positions related to this sell transaction
+          updatedClosedPositions = updatedClosedPositions.filter(
+            cp => cp.sellTransactionId !== tx.id
+          );
+          console.log('     ✅ Reversal complete for', asset.ticker);
+        });
+
+        console.log('🏁 Reversal complete. Final asset count:', updatedAssets.length);
+
+        // P2 FIX: Clean up orphaned closed positions from the deleted asset
+        // If the deleted asset was sold (e.g., ETH→SOL), remove those closed positions too
+        const deletedAssetTicker = assetToDelete.ticker.toUpperCase().split(' ')[0];
+        const orphanedClosedPositions = updatedClosedPositions.filter(cp => {
+          const cpTicker = cp.ticker.toUpperCase().split(' ')[0];
+          return cpTicker === deletedAssetTicker;
+        });
+
+        if (orphanedClosedPositions.length > 0) {
+          console.log('🧹 Cleaning up', orphanedClosedPositions.length, 'orphaned closed positions for', deletedAssetTicker);
+          updatedClosedPositions = updatedClosedPositions.filter(cp => {
+            const cpTicker = cp.ticker.toUpperCase().split(' ')[0];
+            return cpTicker !== deletedAssetTicker;
+          });
+        }
+
+        // Log the final state we're about to return
+        updatedAssets.forEach(a => {
+          console.log(`  📦 Final state for ${a.ticker}: quantity=${a.quantity}, transactions=${a.transactions.length}`);
+        });
+
+        const finalPortfolio = {
+          ...portfolio,
+          assets: updatedAssets,
+          closedPositions: updatedClosedPositions
+        };
+
+        console.log('📤 Returning updated portfolio with', finalPortfolio.assets.length, 'assets');
+        console.log('📤 Closed positions count:', updatedClosedPositions.length);
+        return finalPortfolio;
+      });
+
+      // Log the state AFTER the update
+      console.log('🔍 After updateActivePortfolio call, checking current assets state:');
+      setTimeout(() => {
+        const currentAssets = portfolios.find(p => p.id === activePortfolioId)?.assets || [];
+        console.log('  Current portfolio has', currentAssets.length, 'assets');
+        currentAssets.forEach(a => {
+          console.log(`  ${a.ticker}: quantity=${a.quantity}, transactions=${a.transactions.length}`);
+        });
+      }, 100);
+    } else {
+      // Normal asset deletion - just confirm
+      const confirmed = window.confirm(
+        `Are you sure you want to delete ${assetToDelete.ticker}?\n\n` +
+        `This will remove all ${assetToDelete.quantity.toLocaleString()} units and transaction history.`
+      );
+
+      if (!confirmed) return;
+
+      updateActivePortfolio(portfolio => ({
+        ...portfolio,
+        assets: portfolio.assets.filter(a => a.id !== assetId)
+      }));
+    }
+  };
+
   const handleRemoveTransaction = (assetId: string, txId: string) => {
-    updateActivePortfolio(portfolio => ({
-      ...portfolio,
-      assets: portfolio.assets.map(asset => {
-        if (asset.id !== assetId) return asset;
-        const updatedTxs = asset.transactions.filter(tx => tx.id !== txId);
-        if (updatedTxs.length === 0) return null;
-        const newQty = updatedTxs.reduce((sum, tx) => sum + tx.quantity, 0);
-        const newCost = updatedTxs.reduce((sum, tx) => sum + tx.totalCost, 0);
-        return { ...asset, transactions: updatedTxs, quantity: newQty, totalCostBasis: newCost, avgBuyPrice: newCost / newQty };
-      }).filter(a => a !== null) as Asset[]
-    }));
+    // P2: Check if this is a SELL transaction and validate
+    const asset = assets.find(a => a.id === assetId);
+    if (!asset) return;
+
+    const txToDelete = asset.transactions.find(tx => tx.id === txId);
+    if (!txToDelete) return;
+
+    // P2: If deleting a SELL transaction, check for proceeds and warn user
+    if (txToDelete.type === 'SELL' && txToDelete.proceedsCurrency) {
+      const proceedsTicker = txToDelete.proceedsCurrency;
+      const proceedsAsset = assets.find(a => a.ticker === proceedsTicker);
+
+      if (proceedsAsset) {
+        // P2 FIX: Check for FULL transaction chain before allowing deletion
+        const proceedsTickerBase = proceedsAsset.ticker.toUpperCase().split(' ')[0];
+        const fullChain = findTransactionChain(proceedsTickerBase);
+
+        console.log('🔍 Checking for transaction chain from proceeds', proceedsAsset.ticker);
+        console.log('  Found chain of length:', fullChain.length);
+
+        if (fullChain.length > 0) {
+          // Can't reverse - proceeds have been used in subsequent sales
+          let errorMessage = `❌ Cannot Delete: The proceeds "${proceedsAsset.ticker}" have been sold in a transaction chain:\n\n`;
+
+          // Build the chain visualization
+          const chainVisualization = [asset.ticker, proceedsAsset.ticker];
+          fullChain.forEach(c => {
+            chainVisualization.push(c.soldFor);
+          });
+          errorMessage += `  ${chainVisualization.join(' → ')}\n\n`;
+
+          errorMessage += `Transactions in this chain:\n`;
+          errorMessage += `  • ${txToDelete.quantity} ${asset.ticker} sold for ${proceedsAsset.ticker} on ${new Date(txToDelete.date).toLocaleDateString()}\n`;
+          fullChain.forEach(c => {
+            errorMessage += `  • ${c.tx.quantity} ${c.ticker} sold for ${c.soldFor} on ${new Date(c.tx.date).toLocaleDateString()}\n`;
+          });
+
+          errorMessage += `\n⚠️ Deleting this SELL transaction would corrupt your P&L calculations.\n\n`;
+          errorMessage += `To delete this transaction, you must first reverse the sales in ORDER:\n`;
+
+          // Show the order of deletions (reverse order)
+          for (let i = fullChain.length - 1; i >= 0; i--) {
+            const step = fullChain.length - i;
+            const proceedsTicker2 = fullChain[i].soldFor.split(' ')[0];
+            errorMessage += `${step}. Delete or reverse the ${fullChain[i].ticker}→${proceedsTicker2} sale\n`;
+          }
+          errorMessage += `${fullChain.length + 1}. Then you can delete this ${asset.ticker}→${proceedsAsset.ticker} transaction\n\n`;
+          errorMessage += `This ensures your transaction history remains consistent.`;
+
+          alert(errorMessage);
+          return;
+        }
+
+        // No subsequent sales - show confirmation and proceed
+        const confirmed = window.confirm(
+          `⚠️ Warning: Deleting this SELL transaction will also remove the proceeds position:\n\n` +
+          `${proceedsAsset.ticker}: ${proceedsAsset.quantity.toLocaleString()} units\n\n` +
+          `This will affect your portfolio value and P&L calculations.\n\n` +
+          `Do you want to continue?`
+        );
+        if (!confirmed) return;
+
+        // Delete both the transaction and the proceeds asset
+        updateActivePortfolio(portfolio => {
+          // Remove the proceeds asset
+          let updatedAssets = portfolio.assets.filter(a => a.id !== proceedsAsset.id);
+
+          // P2 FIX: Restore the sold asset using closed positions (same logic as handleRemoveAsset)
+          const assetToRestore = portfolio.assets.find(a => a.id === assetId);
+          if (assetToRestore) {
+            // Remove the SELL transaction
+            let filteredTxs = assetToRestore.transactions.filter(tx => tx.id !== txId);
+
+            // Find closed positions for this sell to restore BUY transactions
+            const relatedClosedPositions = (portfolio.closedPositions || []).filter(
+              cp => cp.sellTransactionId === txId
+            );
+
+            console.log('🔄 Restoring', relatedClosedPositions.length, 'closed positions for', assetToRestore.ticker);
+
+            // Recreate consumed BUY transactions
+            relatedClosedPositions.forEach(cp => {
+              const existingBuyTx = filteredTxs.find(t => t.id === cp.buyTransactionId);
+
+              if (existingBuyTx) {
+                // Partial consumption - add back the consumed quantity
+                filteredTxs = filteredTxs.map(t =>
+                  t.id === cp.buyTransactionId
+                    ? {
+                        ...t,
+                        quantity: t.quantity + cp.entryQuantity,
+                        totalCost: t.totalCost + cp.entryCostBasis
+                      }
+                    : t
+                );
+              } else {
+                // Full consumption - recreate the BUY transaction
+                const recreatedBuyTx: Transaction = {
+                  id: cp.buyTransactionId,
+                  type: 'BUY',
+                  quantity: cp.entryQuantity,
+                  pricePerCoin: cp.entryPrice,
+                  date: cp.entryDate,
+                  totalCost: cp.entryCostBasis,
+                  tag: cp.entryTag || 'DCA',
+                  createdAt: new Date().toISOString(),
+                  purchaseCurrency: cp.entryCurrency as Currency,
+                  exchangeRateAtPurchase: undefined
+                };
+                filteredTxs.push(recreatedBuyTx);
+              }
+            });
+
+            // Recalculate from restored transactions
+            const buyTxs = filteredTxs.filter(t => t.type === 'BUY');
+            const newQty = buyTxs.reduce((sum, t) => sum + t.quantity, 0);
+            const newCost = buyTxs.reduce((sum, t) => sum + t.totalCost, 0);
+
+            updatedAssets = updatedAssets.map(a =>
+              a.id === assetId
+                ? {
+                    ...a,
+                    transactions: filteredTxs,
+                    quantity: newQty,
+                    totalCostBasis: newCost,
+                    avgBuyPrice: newQty > 0 ? newCost / newQty : 0
+                  }
+                : a
+            );
+          }
+
+          // Remove from closed positions
+          let updatedClosedPositions = (portfolio.closedPositions || []).filter(
+            cp => cp.sellTransactionId !== txId
+          );
+
+          // P2 FIX: Clean up orphaned closed positions from the deleted proceeds asset
+          const deletedAssetTicker = proceedsAsset.ticker.toUpperCase().split(' ')[0];
+          const orphanedClosedPositions = updatedClosedPositions.filter(cp => {
+            const cpTicker = cp.ticker.toUpperCase().split(' ')[0];
+            return cpTicker === deletedAssetTicker;
+          });
+
+          if (orphanedClosedPositions.length > 0) {
+            console.log('🧹 Cleaning up', orphanedClosedPositions.length, 'orphaned closed positions for', deletedAssetTicker);
+            updatedClosedPositions = updatedClosedPositions.filter(cp => {
+              const cpTicker = cp.ticker.toUpperCase().split(' ')[0];
+              return cpTicker !== deletedAssetTicker;
+            });
+          }
+
+          return {
+            ...portfolio,
+            assets: updatedAssets,
+            closedPositions: updatedClosedPositions
+          };
+        });
+      } else {
+        // Proceeds don't exist - warn about P&L impact
+        const confirmed = window.confirm(
+          `⚠️ Warning: The proceeds from this SELL transaction no longer exist in your portfolio.\n\n` +
+          `Deleting this transaction may cause incorrect P&L calculations and affect your closed positions.\n\n` +
+          `It's recommended to keep this transaction for accurate records.\n\n` +
+          `Do you still want to delete it?`
+        );
+        if (!confirmed) return;
+
+        // Delete transaction and update closed positions
+        updateActivePortfolio(portfolio => {
+          // P2 FIX: Use the same restoration logic even when proceeds don't exist
+          const assetToRestore = portfolio.assets.find(a => a.id === assetId);
+          let updatedAssets = [...portfolio.assets];
+
+          if (assetToRestore) {
+            // Remove the SELL transaction
+            let filteredTxs = assetToRestore.transactions.filter(tx => tx.id !== txId);
+
+            // Find closed positions for this sell to restore BUY transactions
+            const relatedClosedPositions = (portfolio.closedPositions || []).filter(
+              cp => cp.sellTransactionId === txId
+            );
+
+            console.log('🔄 Restoring', relatedClosedPositions.length, 'closed positions (proceeds gone) for', assetToRestore.ticker);
+
+            // Recreate consumed BUY transactions
+            relatedClosedPositions.forEach(cp => {
+              const existingBuyTx = filteredTxs.find(t => t.id === cp.buyTransactionId);
+
+              if (existingBuyTx) {
+                // Partial consumption - add back the consumed quantity
+                filteredTxs = filteredTxs.map(t =>
+                  t.id === cp.buyTransactionId
+                    ? {
+                        ...t,
+                        quantity: t.quantity + cp.entryQuantity,
+                        totalCost: t.totalCost + cp.entryCostBasis
+                      }
+                    : t
+                );
+              } else {
+                // Full consumption - recreate the BUY transaction
+                const recreatedBuyTx: Transaction = {
+                  id: cp.buyTransactionId,
+                  type: 'BUY',
+                  quantity: cp.entryQuantity,
+                  pricePerCoin: cp.entryPrice,
+                  date: cp.entryDate,
+                  totalCost: cp.entryCostBasis,
+                  tag: cp.entryTag || 'DCA',
+                  createdAt: new Date().toISOString(),
+                  purchaseCurrency: cp.entryCurrency as Currency,
+                  exchangeRateAtPurchase: undefined
+                };
+                filteredTxs.push(recreatedBuyTx);
+              }
+            });
+
+            // Recalculate from restored transactions
+            const buyTxs = filteredTxs.filter(t => t.type === 'BUY');
+            const newQty = buyTxs.reduce((sum, t) => sum + t.quantity, 0);
+            const newCost = buyTxs.reduce((sum, t) => sum + t.totalCost, 0);
+
+            if (filteredTxs.length === 0) {
+              // If no transactions left, remove the asset
+              updatedAssets = updatedAssets.filter(a => a.id !== assetId);
+            } else {
+              updatedAssets = updatedAssets.map(a =>
+                a.id === assetId
+                  ? {
+                      ...a,
+                      transactions: filteredTxs,
+                      quantity: newQty,
+                      totalCostBasis: newCost,
+                      avgBuyPrice: newQty > 0 ? newCost / newQty : 0
+                    }
+                  : a
+              );
+            }
+          }
+
+          // Remove from closed positions
+          const updatedClosedPositions = (portfolio.closedPositions || []).filter(
+            cp => cp.sellTransactionId !== txId
+          );
+
+          return {
+            ...portfolio,
+            assets: updatedAssets,
+            closedPositions: updatedClosedPositions
+          };
+        });
+      }
+    } else {
+      // P2 FIX: Check if this BUY transaction is proceeds from a SELL
+      // Look for SELL transactions that created this asset
+      const assetTickerBase = asset.ticker.toUpperCase().split(' ')[0];
+      const sellTransactionsForThisAsset: Array<{ asset: Asset; tx: Transaction }> = [];
+
+      assets.forEach(a => {
+        a.transactions.forEach(tx => {
+          if (tx.type === 'SELL' && tx.proceedsCurrency) {
+            const proceedsTicker = tx.proceedsCurrency.toUpperCase().split(' ')[0];
+            if (proceedsTicker === assetTickerBase) {
+              sellTransactionsForThisAsset.push({ asset: a, tx });
+            }
+          }
+        });
+      });
+
+      if (sellTransactionsForThisAsset.length > 0) {
+        // P2 FIX: Check if this specific transaction's date matches a sell transaction
+        // This identifies if THIS particular BUY was created from proceeds
+        const matchingSellTx = sellTransactionsForThisAsset.find(({ tx }) => {
+          // Check if the dates are close (same day)
+          const sellDate = new Date(tx.date).toDateString();
+          const buyDate = new Date(txToDelete.date).toDateString();
+          return sellDate === buyDate;
+        });
+
+        if (matchingSellTx) {
+          // This specific BUY transaction is proceeds from a SELL
+          if (asset.transactions.length === 1) {
+            // Only one transaction - deleting will remove entire asset
+            const confirmed = window.confirm(
+              `⚠️ Warning: "${asset.ticker}" is proceeds from a sell transaction.\n\n` +
+              `Deleting this transaction will remove the entire position and REVERSE the original sale.\n\n` +
+              `Do you want to continue?`
+            );
+
+            if (!confirmed) return;
+
+            // Use the same logic as handleRemoveAsset for proceeds
+            handleRemoveAsset(assetId);
+            return;
+          } else {
+            // Multiple transactions - warn that we can't partially delete proceeds
+            alert(
+              `❌ Cannot delete this transaction.\n\n` +
+              `This "${asset.ticker}" purchase is proceeds from selling ${matchingSellTx.asset.ticker}.\n\n` +
+              `To reverse this, you must delete the entire "${asset.ticker}" position using the delete button (trash icon next to refresh).`
+            );
+            return;
+          }
+        }
+      }
+
+      // Normal BUY transaction deletion
+      updateActivePortfolio(portfolio => ({
+        ...portfolio,
+        assets: portfolio.assets.map(assetItem => {
+          if (assetItem.id !== assetId) return assetItem;
+          const updatedTxs = assetItem.transactions.filter(tx => tx.id !== txId);
+          if (updatedTxs.length === 0) return null;
+          const newQty = updatedTxs.reduce((sum, tx) => sum + tx.quantity, 0);
+          const newCost = updatedTxs.reduce((sum, tx) => sum + tx.totalCost, 0);
+          return { ...assetItem, transactions: updatedTxs, quantity: newQty, totalCostBasis: newCost, avgBuyPrice: newCost / newQty };
+        }).filter(a => a !== null) as Asset[]
+      }));
+    }
   };
 
   const handleEditTransaction = (assetId: string, txId: string, updates: { quantity: number; pricePerCoin: number; date: string; tag: TransactionTag; customTag?: string }) => {
@@ -440,10 +1077,10 @@ const App: React.FC = () => {
       ...portfolio,
       assets: portfolio.assets.map(asset => {
         if (asset.id !== assetId) return asset;
-        
+
         const updatedTransactions = asset.transactions.map(tx => {
           if (tx.id !== txId) return tx;
-          
+
           return {
             ...tx,
             quantity: updates.quantity,
@@ -455,10 +1092,10 @@ const App: React.FC = () => {
             lastEdited: new Date().toISOString()
           };
         });
-        
+
         const newQty = updatedTransactions.reduce((sum, tx) => sum + tx.quantity, 0);
         const newCost = updatedTransactions.reduce((sum, tx) => sum + tx.totalCost, 0);
-        
+
         return {
           ...asset,
           transactions: updatedTransactions,
@@ -468,6 +1105,329 @@ const App: React.FC = () => {
         };
       })
     }));
+  };
+
+  // P2: Undo sell transaction
+  const handleUndoSell = () => {
+    if (!undoNotification) return;
+
+    const { sellTransactionId, proceedsCurrency } = undoNotification;
+
+    console.log('🔄 Undoing sell transaction:', sellTransactionId);
+
+    // Find the proceeds asset to delete
+    const proceedsAsset = assets.find(a => {
+      const assetTicker = a.ticker.toUpperCase().split(' ')[0];
+      const proceedsTicker = proceedsCurrency.toUpperCase().split(' ')[0];
+      return assetTicker === proceedsTicker;
+    });
+
+    if (!proceedsAsset) {
+      console.warn('⚠️ Proceeds asset not found for undo');
+      setUndoNotification(null);
+      return;
+    }
+
+    // Find the asset that was sold
+    const soldAsset = assets.find(a => {
+      return a.transactions.some(tx => tx.id === sellTransactionId);
+    });
+
+    if (!soldAsset) {
+      console.warn('⚠️ Sold asset not found for undo');
+      setUndoNotification(null);
+      return;
+    }
+
+    // Use the same logic as handleRemoveTransaction for SELL
+    updateActivePortfolio(portfolio => {
+      // Remove the proceeds asset
+      let updatedAssets = portfolio.assets.filter(a => a.id !== proceedsAsset.id);
+
+      // Restore the sold asset
+      const assetToRestore = portfolio.assets.find(a => a.id === soldAsset.id);
+      if (assetToRestore) {
+        // Remove the SELL transaction
+        let filteredTxs = assetToRestore.transactions.filter(tx => tx.id !== sellTransactionId);
+
+        // Find closed positions for this sell to restore BUY transactions
+        const relatedClosedPositions = (portfolio.closedPositions || []).filter(
+          cp => cp.sellTransactionId === sellTransactionId
+        );
+
+        console.log('🔄 Restoring', relatedClosedPositions.length, 'closed positions for', assetToRestore.ticker);
+
+        // Recreate consumed BUY transactions
+        relatedClosedPositions.forEach(cp => {
+          const existingBuyTx = filteredTxs.find(t => t.id === cp.buyTransactionId);
+
+          if (existingBuyTx) {
+            // Partial consumption - add back the consumed quantity
+            filteredTxs = filteredTxs.map(t =>
+              t.id === cp.buyTransactionId
+                ? {
+                    ...t,
+                    quantity: t.quantity + cp.entryQuantity,
+                    totalCost: t.totalCost + cp.entryCostBasis
+                  }
+                : t
+            );
+          } else {
+            // Full consumption - recreate the BUY transaction
+            const recreatedBuyTx: Transaction = {
+              id: cp.buyTransactionId,
+              type: 'BUY',
+              quantity: cp.entryQuantity,
+              pricePerCoin: cp.entryPrice,
+              date: cp.entryDate,
+              totalCost: cp.entryCostBasis,
+              tag: cp.entryTag || 'DCA',
+              createdAt: new Date().toISOString(),
+              purchaseCurrency: cp.entryCurrency as Currency,
+              exchangeRateAtPurchase: undefined
+            };
+            filteredTxs.push(recreatedBuyTx);
+          }
+        });
+
+        // Recalculate from restored transactions
+        const buyTxs = filteredTxs.filter(t => t.type === 'BUY');
+        const newQty = buyTxs.reduce((sum, t) => sum + t.quantity, 0);
+        const newCost = buyTxs.reduce((sum, t) => sum + t.totalCost, 0);
+
+        updatedAssets = updatedAssets.map(a =>
+          a.id === soldAsset.id
+            ? {
+                ...a,
+                transactions: filteredTxs,
+                quantity: newQty,
+                totalCostBasis: newCost,
+                avgBuyPrice: newQty > 0 ? newCost / newQty : 0
+              }
+            : a
+        );
+      }
+
+      // Remove from closed positions
+      let updatedClosedPositions = (portfolio.closedPositions || []).filter(
+        cp => cp.sellTransactionId !== sellTransactionId
+      );
+
+      // Clean up orphaned closed positions from the deleted proceeds asset
+      const deletedAssetTicker = proceedsAsset.ticker.toUpperCase().split(' ')[0];
+      const orphanedClosedPositions = updatedClosedPositions.filter(cp => {
+        const cpTicker = cp.ticker.toUpperCase().split(' ')[0];
+        return cpTicker === deletedAssetTicker;
+      });
+
+      if (orphanedClosedPositions.length > 0) {
+        console.log('🧹 Cleaning up', orphanedClosedPositions.length, 'orphaned closed positions for', deletedAssetTicker);
+        updatedClosedPositions = updatedClosedPositions.filter(cp => {
+          const cpTicker = cp.ticker.toUpperCase().split(' ')[0];
+          return cpTicker !== deletedAssetTicker;
+        });
+      }
+
+      return {
+        ...portfolio,
+        assets: updatedAssets,
+        closedPositions: updatedClosedPositions
+      };
+    });
+
+    // Clear notification
+    setUndoNotification(null);
+    console.log('✅ Sell transaction undone');
+  };
+
+  // P2: Trading Lifecycle - Sell Asset Handler
+  const handleSellAsset = async (
+    asset: Asset,
+    quantity: number,
+    pricePerCoinOrQtyReceived: number,
+    date: string,
+    proceedsCurrency: string,
+    tag?: TransactionTag,
+    isCryptoToCrypto?: boolean
+  ) => {
+    try {
+      const sellTransactionId = Math.random().toString(36).substr(2, 9);
+
+      // Parse date in local timezone (same as handleAddAsset)
+      const [year, month, day] = date.split('-').map(Number);
+      const localDate = new Date(year, month - 1, day);
+
+      // Fetch historical FX rates for the sell date
+      let historicalRates: Record<Currency, number> | undefined;
+      try {
+        historicalRates = await fetchHistoricalExchangeRatesForDate(localDate);
+      } catch (error) {
+        console.warn(`⚠️ Failed to fetch historical FX rates for ${date}:`, error);
+      }
+
+      // P2: For crypto-to-crypto, we need to calculate the USD value at trade time
+      let pricePerCoin: number;
+      let proceedsValueUSD: number | undefined;
+
+      if (isCryptoToCrypto) {
+        const quantityReceived = pricePerCoinOrQtyReceived;
+
+        // P2 FIX: For crypto-to-crypto, the proceeds value should be the MARKET VALUE of what we're selling
+        // NOT the cost basis. We need to use the current price of the asset being sold.
+        const soldAssetCurrency = asset.currency || detectAssetNativeCurrency(asset.ticker);
+
+        // Get the market value of what we're selling in USD
+        const marketValueInSoldCurrency = quantity * asset.currentPrice;
+        const marketValueUSD = soldAssetCurrency === 'USD'
+          ? marketValueInSoldCurrency
+          : convertCurrencySync(marketValueInSoldCurrency, soldAssetCurrency, 'USD', exchangeRates);
+
+        console.log('🔄 Crypto-to-crypto trade - using MARKET VALUE:');
+        console.log('  Selling:', quantity, asset.ticker, '@ market price', asset.currentPrice);
+        console.log('  Market value in', soldAssetCurrency, ':', marketValueInSoldCurrency);
+        console.log('  Market value in USD:', marketValueUSD);
+        console.log('  Receiving:', quantityReceived, proceedsCurrency);
+
+        // The price per received coin should be based on the market value we're giving up
+        pricePerCoin = marketValueUSD / quantityReceived;
+
+        // For P&L calculation, the proceeds value IS the market value (no gain/loss on the trade itself)
+        proceedsValueUSD = marketValueUSD;
+
+        console.log('  Price per received coin (market-based cost basis):', pricePerCoin);
+        console.log('  This means ETH should have zero P&L immediately after trade');
+      } else {
+        pricePerCoin = pricePerCoinOrQtyReceived;
+        proceedsValueUSD = undefined; // Will be calculated from pricePerCoin in the function
+      }
+
+      // Calculate realized P&L using FIFO
+      const result = calculateRealizedPnL(
+        asset,
+        quantity,
+        pricePerCoin,
+        proceedsCurrency,
+        date,
+        displayCurrency,
+        exchangeRates,
+        tag,
+        sellTransactionId,
+        proceedsValueUSD // P2: Pass USD value for crypto-to-crypto
+      );
+
+      // Create SELL transaction
+      const sellTx: Transaction = {
+        id: sellTransactionId,
+        type: 'SELL',
+        quantity,
+        pricePerCoin,
+        date,
+        totalCost: quantity * pricePerCoin, // Total proceeds
+        tag: tag || 'Profit-Taking',
+        proceedsCurrency,
+        createdAt: new Date().toISOString(),
+        purchaseCurrency: detectAssetNativeCurrency(asset.ticker),
+        exchangeRateAtPurchase: historicalRates
+      };
+
+      // Calculate updated asset values
+      const newQuantity = asset.quantity - quantity;
+      const isFullSell = newQuantity === 0;
+
+      // Recalculate cost basis from remaining BUY transactions
+      const remainingBuyTxs = result.remainingTransactions.filter(tx => tx.type === 'BUY');
+      const newTotalCostBasis = remainingBuyTxs.reduce((sum, tx) => sum + tx.totalCost, 0);
+      const newAvgBuyPrice = newQuantity > 0 ? newTotalCostBasis / newQuantity : 0;
+
+      const updatedAsset: Asset = {
+        ...asset,
+        transactions: [...result.remainingTransactions, sellTx],
+        quantity: newQuantity,
+        totalCostBasis: newTotalCostBasis,
+        avgBuyPrice: newAvgBuyPrice,
+        lastUpdated: new Date().toISOString()
+      };
+
+      // P2: Update portfolio with sold asset and add proceeds
+      updateActivePortfolio(portfolio => {
+        let updatedAssets = portfolio.assets;
+
+        if (isFullSell) {
+          // Remove asset from active assets
+          updatedAssets = updatedAssets.filter(a => a.id !== asset.id);
+        } else {
+          // Update asset with new values
+          updatedAssets = updatedAssets.map(a => a.id === asset.id ? updatedAsset : a);
+        }
+
+        // P2: Handle proceeds - either crypto or cash position
+        if (isCryptoToCrypto) {
+          // For crypto-to-crypto, we'll add the crypto position after this update
+          // (needs to be done separately to trigger price fetch)
+        } else {
+          // Add or update cash position (stablecoins or fiat)
+          const totalProceeds = quantity * pricePerCoin;
+          const cashAsset = createOrUpdateCashPosition(
+            updatedAssets,
+            totalProceeds,
+            proceedsCurrency,
+            date,
+            tag
+          );
+
+          const existingCashIndex = updatedAssets.findIndex(a => a.ticker === cashAsset.ticker);
+          if (existingCashIndex >= 0) {
+            updatedAssets[existingCashIndex] = cashAsset;
+          } else {
+            updatedAssets.push(cashAsset);
+          }
+        }
+
+        return {
+          ...portfolio,
+          assets: updatedAssets,
+          closedPositions: [...(portfolio.closedPositions || []), ...result.closedPositions]
+        };
+      });
+
+      // P2: If crypto-to-crypto, add the received crypto as a new position
+      if (isCryptoToCrypto) {
+        const quantityReceived = pricePerCoinOrQtyReceived;
+
+        // P2 FIX: pricePerCoin was already calculated above using market value
+        // It represents the cost basis per received coin in USD
+        await handleAddAsset(
+          proceedsCurrency, // ticker (e.g., 'ETH')
+          quantityReceived, // quantity received (e.g., 2.76)
+          pricePerCoin, // cost basis per coin in USD (based on market value of sold asset)
+          date,
+          'USD', // Crypto cost basis in USD
+          tag || 'Profit-Taking'
+        );
+      }
+
+      // Close modal
+      setSellModalAsset(null);
+
+      // Show success message
+      const totalProceeds = quantity * pricePerCoin;
+      console.log(`✅ Sold ${quantity} ${asset.ticker} for ${proceedsCurrency} ${isCryptoToCrypto ? pricePerCoinOrQtyReceived.toFixed(8) : totalProceeds.toFixed(2)}`);
+      console.log(`💰 Realized P&L: ${displayCurrency} ${result.realizedPnL.toFixed(2)} (${result.realizedPnLPercent.toFixed(2)}%)`);
+
+      // P2: Show undo notification for 10 seconds
+      setUndoNotification({
+        visible: true,
+        sellTransactionId,
+        ticker: asset.ticker,
+        quantity,
+        proceedsCurrency,
+        countdown: 10
+      });
+
+    } catch (error) {
+      console.error('❌ Sell transaction failed:', error);
+      throw error;
+    }
   };
 
   const handleRefreshAll = async () => {
@@ -555,6 +1515,7 @@ const App: React.FC = () => {
       name,
       color: PORTFOLIO_COLORS[portfolios.length % PORTFOLIO_COLORS.length],
       assets: [],
+      closedPositions: [], // P2: Trading Lifecycle
       history: [],
       settings: {},
       createdAt: new Date().toISOString()
@@ -703,10 +1664,12 @@ const App: React.FC = () => {
 
       <main className="max-w-screen-2xl mx-auto px-8 py-8">
         {/* P1.1 CHANGE: Pass displayCurrency, setDisplayCurrency, and exchangeRates to Summary */}
-        <Summary 
-          summary={summary} 
-          assets={assets} 
-          onRefreshAll={handleRefreshAll} 
+        {/* P2: Pass closedPositions for realized P&L */}
+        <Summary
+          summary={summary}
+          assets={assets}
+          closedPositions={activePortfolio?.closedPositions || []}
+          onRefreshAll={handleRefreshAll}
           isGlobalLoading={isLoading}
           displayCurrency={displayCurrency}
           setDisplayCurrency={setDisplayCurrency}
@@ -731,26 +1694,33 @@ const App: React.FC = () => {
         <AddAssetForm onAdd={handleAddAsset} isGlobalLoading={isLoading} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {assets.map(asset => (
-            <AssetCard 
-              key={asset.id} 
-              asset={asset} 
-              totalPortfolioValue={summary.totalValue} 
-              onRemoveTransaction={handleRemoveTransaction} 
+            <AssetCard
+              key={asset.id}
+              asset={asset}
+              totalPortfolioValue={summary.totalValue}
+              onRemoveTransaction={handleRemoveTransaction}
               onEditTransaction={handleEditTransaction}
-              onRefresh={handleRefreshAsset} 
-              onRemove={() => updateActivePortfolio(portfolio => ({
-                ...portfolio,
-                assets: portfolio.assets.filter(a => a.id !== asset.id)
-              }))} 
-              onUpdate={handleUpdateAsset} 
-              onRetryHistory={() => {}} 
+              onRefresh={handleRefreshAsset}
+              onRemove={() => handleRemoveAsset(asset.id)}
+              onUpdate={handleUpdateAsset}
+              onRetryHistory={() => {}}
+              onSell={(asset) => setSellModalAsset(asset)}
+              closedPositions={activePortfolio?.closedPositions || []}
             />
           ))}
+        </div>
+
+        {/* P2: Closed Positions Panel - placed at bottom after open positions */}
+        <div className="mt-4">
+          <ClosedPositionsPanel
+            closedPositions={activePortfolio?.closedPositions || []}
+            displayCurrency={displayCurrency}
+          />
         </div>
       </main>
 
       <ApiKeySettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <PortfolioManager 
+      <PortfolioManager
         isOpen={isPortfolioManagerOpen}
         onClose={() => setIsPortfolioManagerOpen(false)}
         portfolios={portfolios}
@@ -760,6 +1730,55 @@ const App: React.FC = () => {
         onRenamePortfolio={handleRenamePortfolio}
         onDeletePortfolio={handleDeletePortfolio}
       />
+
+      {/* P2: Sell Modal */}
+      {sellModalAsset && (
+        <SellModal
+          asset={sellModalAsset}
+          onSell={(qty, price, date, currency, tag, isCryptoToCrypto) =>
+            handleSellAsset(sellModalAsset, qty, price, date, currency, tag, isCryptoToCrypto)
+          }
+          onClose={() => setSellModalAsset(null)}
+          displayCurrency={displayCurrency}
+          exchangeRates={exchangeRates}
+        />
+      )}
+
+      {/* P2: Undo Notification */}
+      {undoNotification?.visible && (
+        <div className="fixed bottom-8 right-8 z-50 animate-in slide-in-from-bottom-5">
+          <div className="bg-slate-800 border border-slate-700 rounded-lg shadow-2xl p-4 min-w-[400px]">
+            <div className="flex items-start gap-3">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-emerald-400 font-bold">✓</span>
+                  <h3 className="text-white font-semibold">Transaction Completed</h3>
+                </div>
+                <p className="text-slate-300 text-sm">
+                  Sold {undoNotification.quantity.toLocaleString('en-US', { maximumFractionDigits: 8 })} {undoNotification.ticker} for {undoNotification.proceedsCurrency}
+                </p>
+                <p className="text-slate-500 text-xs mt-1">
+                  Auto-dismissing in {undoNotification.countdown}s
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleUndoSell}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  Undo
+                </button>
+                <button
+                  onClick={() => setUndoNotification(null)}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium rounded-lg transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

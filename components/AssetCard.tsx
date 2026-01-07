@@ -12,6 +12,8 @@ interface AssetCardProps {
   onUpdate: (id: string, updates: Partial<Asset>) => void;
   onRetryHistory: (id: string) => void;
   onEditTransaction: (assetId: string, txId: string, updates: { quantity?: number; pricePerCoin?: number; date?: string; tag?: TransactionTag }) => void;
+  onSell: (asset: Asset) => void; // P2: Trading Lifecycle - Open sell modal
+  closedPositions?: any[]; // P2: For calculating SELL transaction P&L
 }
 
 const TAG_COLORS: Record<TransactionTag, string> = {
@@ -38,8 +40,26 @@ const ASSET_TYPE_CONFIG = {
 const calculateFxAdjustedPnL = (
   tx: any,
   assetCurrency: Currency,
-  currentPrice: number
+  currentPrice: number,
+  closedPositions?: any[]
 ): { pnl: number; costBasis: number; currentValue: number } => {
+  // P2 FIX: For SELL transactions, P&L comes from closed positions
+  if (tx.type === 'SELL') {
+    // Find the closed position(s) for this sell transaction
+    const relatedClosedPositions = (closedPositions || []).filter(
+      (cp: any) => cp.sellTransactionId === tx.id
+    );
+
+    const realizedPnL = relatedClosedPositions.reduce((sum: number, cp: any) => sum + cp.realizedPnL, 0);
+
+    return {
+      pnl: realizedPnL,
+      costBasis: tx.totalCost, // The proceeds
+      currentValue: tx.totalCost + realizedPnL // Proceeds = cost basis + profit
+    };
+  }
+
+  // For BUY transactions
   const currentValue = tx.quantity * currentPrice;
 
   // If transaction has historical FX rates, use them for accurate conversion
@@ -72,7 +92,7 @@ const calculateFxAdjustedPnL = (
   };
 };
 
-export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue, onRemove, onRemoveTransaction, onRefresh, onUpdate, onEditTransaction }) => {
+export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue, onRemove, onRemoveTransaction, onRefresh, onUpdate, onEditTransaction, onSell, closedPositions }) => {
   const [showDetails, setShowDetails] = useState(false);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ quantity: string; pricePerCoin: string; date: string; tag: TransactionTag; customTag: string }>({
@@ -86,22 +106,26 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
   // Use asset's native currency for display
   const assetCurrency: Currency = asset.currency || 'USD';
 
+  // P2: For stablecoins and crypto, treat as USD for currency formatting
+  // Stablecoins like USDT, USDC, DAI are not valid ISO currency codes
+  const displayCurrency: Currency = ['USDT', 'USDC', 'DAI', 'BTC', 'ETH', 'SOL'].includes(assetCurrency as string) ? 'USD' : assetCurrency;
+
   // P1.1B CHANGE: Calculate FX-adjusted total P&L
   // Calculate aggregate FX-adjusted values
   let totalFxAdjustedCost = 0;
   let totalCurrentValue = 0;
-  
+
   asset.transactions.forEach(tx => {
-    const { costBasis, currentValue } = calculateFxAdjustedPnL(tx, assetCurrency, asset.currentPrice);
+    const { costBasis, currentValue } = calculateFxAdjustedPnL(tx, assetCurrency, asset.currentPrice, closedPositions);
     totalFxAdjustedCost += costBasis;
     totalCurrentValue += currentValue;
   });
-  
+
   const currentTotalValue = totalCurrentValue;
   const totalCost = totalFxAdjustedCost;
   const profitLoss = currentTotalValue - totalCost;
   const profitLossPercent = totalCost > 0 ? (profitLoss / totalCost) * 100 : 0;
-  
+
   const isProfit = profitLoss >= 0;
   const hasHistory = asset.priceHistory && asset.priceHistory.length > 0;
 
@@ -110,7 +134,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
   const deviation = currentAllocation - targetAllocation;
   const isDeviationSignificant = targetAllocation > 0 && Math.abs(deviation) >= 5;
 
-  const currencyFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: assetCurrency });
+  const currencyFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: displayCurrency });
   const pctFmt = new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 2, signDisplay: "always" });
 
   const isContractAddress = asset.ticker.startsWith('0x') && asset.ticker.length >= 40;
@@ -210,6 +234,13 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
           {showDetails ? 'Hide' : 'Transactions'}
         </button>
         <div className="flex gap-2">
+          <button
+            onClick={() => onSell(asset)}
+            className="p-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors"
+            title="Sell Asset"
+          >
+            <TrendingDown size={16} />
+          </button>
            <button onClick={() => onRefresh(asset.id)} disabled={asset.isUpdating} className={`p-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-all ${asset.isUpdating ? 'animate-spin' : ''}`}>
             <RefreshCw size={16} />
           </button>
@@ -262,7 +293,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
                 <tbody className="divide-y divide-slate-700/50 text-slate-300">
                   {asset.transactions.map((tx) => {
                     // P1.1B CHANGE: Use FX-adjusted P&L calculation
-                    const { pnl: txPnL } = calculateFxAdjustedPnL(tx, assetCurrency, asset.currentPrice);
+                    const { pnl: txPnL } = calculateFxAdjustedPnL(tx, assetCurrency, asset.currentPrice, closedPositions);
                     
                     const isEditing = editingTxId === tx.id;
                     const txTag = tx.tag || 'DCA';

@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { PortfolioSummary, Asset, Currency } from '../types';
+import { PortfolioSummary, Asset, Currency, ClosedPosition } from '../types';
 import { fetchExchangeRates, convertCurrencySync, fetchHistoricalExchangeRates, convertCurrencySyncHistorical } from '../services/currencyService';
 import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle } from 'lucide-react';
 
@@ -7,6 +7,7 @@ import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle } f
 interface SummaryProps {
   summary: PortfolioSummary;
   assets: Asset[];
+  closedPositions: ClosedPosition[]; // P2: For realized P&L
   onRefreshAll: () => void;
   isGlobalLoading: boolean;
   displayCurrency: Currency;
@@ -51,14 +52,15 @@ interface ChartDataPoint {
 }
 
 // P1.1 CHANGE: Destructure displayCurrency, setDisplayCurrency, and exchangeRates from props
-export const Summary: React.FC<SummaryProps> = ({ 
-  summary, 
-  assets, 
-  onRefreshAll, 
+export const Summary: React.FC<SummaryProps> = ({
+  summary,
+  assets,
+  closedPositions,
+  onRefreshAll,
   isGlobalLoading,
   displayCurrency,
   setDisplayCurrency,
-  exchangeRates 
+  exchangeRates
 }) => {
   const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
   const [customStart, setCustomStart] = useState('');
@@ -124,7 +126,9 @@ export const Summary: React.FC<SummaryProps> = ({
       console.warn('⚠️ convertToDisplayCurrency called before rates loaded - returning original value');
       return value; // Return original value as fallback (better than 0)
     }
-    return convertCurrencySync(value, fromCurrency, toCurrency, exchangeRates);
+    // P2: Map stablecoins to USD for FX conversion
+    const fxCurrency = ['USDT', 'USDC', 'DAI'].includes(fromCurrency) ? 'USD' : fromCurrency;
+    return convertCurrencySync(value, fxCurrency, toCurrency, exchangeRates);
   };
 
   // P1.1B CHANGE: Calculate FX-adjusted totals from assets
@@ -153,9 +157,13 @@ export const Summary: React.FC<SummaryProps> = ({
       const valueInDisplay = convertToDisplayCurrency(assetValue, assetCurrency, displayCurrency);
 
       // P1.1B CHANGE: Cost basis - convert each transaction using its HISTORICAL rates
+      // P2: Only include BUY transactions for cost basis (exclude SELL transactions)
       let costBasisInDisplay = 0;
 
       for (const tx of asset.transactions) {
+        // Skip SELL transactions - they don't contribute to cost basis of open positions
+        if (tx.type === 'SELL') continue;
+
         if (tx.exchangeRateAtPurchase && tx.purchaseCurrency) {
           // Convert cost from purchase currency directly to display currency using historical rates
           const costInDisplay = convertCurrencySync(
@@ -199,14 +207,48 @@ export const Summary: React.FC<SummaryProps> = ({
       pnlPercent: pnlPct
     };
   }, [ratesLoaded, assets, displayCurrency, exchangeRates]);
-  
+
+  // P2: Calculate realized P&L from closed positions
+  const { realizedPnL, formattedRealizedPnL } = useMemo(() => {
+    if (!ratesLoaded) {
+      return { realizedPnL: 0, formattedRealizedPnL: '...' };
+    }
+
+    // Sum up all realized P&L from closed positions
+    // Closed positions already store P&L in display currency
+    const totalRealizedPnL = closedPositions.reduce((sum, pos) => sum + pos.realizedPnL, 0);
+
+    return {
+      realizedPnL: totalRealizedPnL,
+      formattedRealizedPnL: new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: displayCurrency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+        signDisplay: "always"
+      }).format(totalRealizedPnL)
+    };
+  }, [ratesLoaded, closedPositions, displayCurrency]);
+
+  // P2: Total P&L = Unrealized (open positions) + Realized (closed positions)
+  const totalPnL = convertedPnL + realizedPnL;
+  const formattedTotalPnL = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: displayCurrency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    signDisplay: "always"
+  }).format(totalPnL);
+
   const formattedPnLPct = new Intl.NumberFormat('en-US', {
     style: 'percent',
     minimumFractionDigits: 2,
     signDisplay: "always"
   }).format(pnlPercent / 100);
 
-  const isProfit = convertedPnL >= 0;
+  const isProfit = totalPnL >= 0;
+  const isUnrealizedProfit = convertedPnL >= 0;
+  const isRealizedProfit = realizedPnL >= 0;
 
   // --- Stacked Area Chart Logic ---
   const { Chart, xAxisLabels, yAxisLabels, chartData, maxY } = useMemo(() => {
@@ -299,6 +341,9 @@ export const Summary: React.FC<SummaryProps> = ({
                if (txTime <= t) {
                    qtyAtTime += tx.quantity;
 
+                   // P2: Skip SELL transactions - they don't contribute to cost basis
+                   if (tx.type === 'SELL') return;
+
                    // P1.1B CHANGE: Convert each transaction's cost directly to display currency
                    // using its HISTORICAL rate from purchase date
                    if (tx.exchangeRateAtPurchase && tx.purchaseCurrency) {
@@ -312,9 +357,11 @@ export const Summary: React.FC<SummaryProps> = ({
                    } else {
                      // Fallback: convert using current rates
                      const assetCurrency = asset.currency || detectCurrencyFromTicker(asset.ticker);
+                     // P2: Map stablecoins to USD for FX conversion
+                     const fxCurrency = ['USDT', 'USDC', 'DAI'].includes(assetCurrency) ? 'USD' : assetCurrency;
                      const costInDisplay = convertCurrencySync(
                        tx.totalCost,
-                       assetCurrency,
+                       fxCurrency,
                        displayCurrency,
                        exchangeRates
                      );
@@ -619,10 +666,22 @@ export const Summary: React.FC<SummaryProps> = ({
                 </button>
               </div>
               <div className="text-3xl font-bold tracking-tight mb-1">{formattedTotal}</div>
-              
-              <div className={`inline-flex items-center gap-1 text-sm font-medium px-2 py-1 rounded ${isProfit ? 'bg-emerald-500/20 text-emerald-200' : 'bg-rose-500/20 text-rose-200'}`}>
-                {isProfit ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                <span>{formattedPnL} ({formattedPnLPct})</span>
+
+              {/* P2: Split P&L display - Total, Unrealized, Realized */}
+              <div className="space-y-1">
+                <div className={`inline-flex items-center gap-1 text-sm font-medium px-2 py-1 rounded ${isProfit ? 'bg-emerald-500/20 text-emerald-200' : 'bg-rose-500/20 text-rose-200'}`}>
+                  {isProfit ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                  <span>{formattedTotalPnL} ({formattedPnLPct})</span>
+                </div>
+                <div className="flex gap-2 text-xs">
+                  <span className={`${isUnrealizedProfit ? 'text-emerald-300' : 'text-rose-300'}`}>
+                    Unrealized: {formattedPnL}
+                  </span>
+                  <span className="text-slate-400">•</span>
+                  <span className={`${isRealizedProfit ? 'text-emerald-300' : 'text-rose-300'}`}>
+                    Realized: {formattedRealizedPnL}
+                  </span>
+                </div>
               </div>
             </div>
             <div className="text-xs text-indigo-300/80 mt-4 flex items-center gap-1">

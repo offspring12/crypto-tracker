@@ -25,12 +25,15 @@ export interface Transaction {
   quantity: number;
   pricePerCoin: number;
   date: string;
-  totalCost: number;
+  totalCost: number; // For SELL transactions, this represents proceeds (positive value)
   tag?: TransactionTag;
   lastEdited?: string;
   createdAt?: string;
   purchaseCurrency?: Currency; // P1.1B NEW: Currency used at purchase time (e.g., 'USD', 'CHF')
   exchangeRateAtPurchase?: Record<Currency, number>; // P1.1B NEW: Snapshot of ALL exchange rates at purchase date
+
+  // P2: Trading Lifecycle - For SELL transactions only
+  proceedsCurrency?: string; // For crypto sells: which asset/currency did you sell to? (e.g., 'USDT', 'ETH', 'BTC')
 }
 
 export interface Asset {
@@ -59,11 +62,56 @@ export interface HistorySnapshot {
   assetValues: Record<string, number>;
 }
 
+// ============================================================================
+// P2: TRADING LIFECYCLE & CASH MANAGEMENT
+// ============================================================================
+
+/**
+ * Closed position representing a completed buy-sell cycle
+ * Tracks realized P&L using FIFO cost basis
+ */
+export interface ClosedPosition {
+  id: string;
+  ticker: string;
+  name: string;
+  assetType: AssetType;
+
+  // Links to original transactions
+  buyTransactionId: string;
+  sellTransactionId: string;
+
+  // Entry details
+  entryDate: string;
+  entryPrice: number;
+  entryQuantity: number;
+  entryCostBasis: number; // In display currency
+  entryCurrency: Currency;
+  entryTag?: TransactionTag;
+
+  // Exit details
+  exitDate: string;
+  exitPrice: number;
+  exitQuantity: number;
+  exitProceeds: number; // In display currency
+  exitCurrency: string; // For crypto, can be 'USDT', 'ETH', etc.; for stocks, native currency
+  exitTag?: TransactionTag;
+
+  // P&L (in display currency)
+  realizedPnL: number;
+  realizedPnLPercent: number;
+
+  // Metadata
+  displayCurrency: Currency;
+  closedAt: string; // ISO timestamp
+  holdingPeriodDays: number;
+}
+
 export interface Portfolio {
   id: string;
   name: string;
   color: string;
   assets: Asset[];
+  closedPositions: ClosedPosition[]; // P2: Trading Lifecycle - Closed positions history
   history: HistorySnapshot[];
   settings: {
     displayCurrency?: Currency; // Optional: portfolio-level display currency
@@ -74,9 +122,17 @@ export interface Portfolio {
 export interface PortfolioSummary {
   totalValue: number;
   totalCostBasis: number;
-  totalPnL: number;
+
+  // P2: Trading Lifecycle - Split P&L
+  unrealizedPnL: number;          // From open positions
+  unrealizedPnLPercent: number;
+  realizedPnL: number;             // From closed positions
+  realizedPnLPercent: number;
+
+  totalPnL: number;                // Sum of realized + unrealized
   totalPnLPercent: number;
   assetCount: number;
+  closedPositionCount: number;     // P2: Count of closed positions
   lastGlobalUpdate: string | null;
 }
 
