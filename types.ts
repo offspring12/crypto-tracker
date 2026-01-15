@@ -39,6 +39,7 @@ export interface Transaction {
   exchangeRateAtPurchase?: Record<Currency, number>; // P1.1B NEW: Snapshot of ALL exchange rates at purchase date
 
   // P2: Trading Lifecycle - For SELL transactions only
+  proceeds?: number; // Total proceeds from sale (market value received)
   proceedsCurrency?: string; // For crypto sells: which asset/currency did you sell to? (e.g., 'USDT', 'ETH', 'BTC')
 
   // P3: Cash Flow Management - DEPOSIT specific
@@ -60,6 +61,10 @@ export interface Transaction {
   // P3: BUY specific - source of funds
   sourceTicker?: string; // What you paid with (e.g., 'USD', 'BTC', 'ETH')
   sourceQuantity?: number; // How much you paid
+
+  // P4: SELL specific - destination of funds (for buy with asset transactions)
+  destinationTicker?: string; // What you bought (e.g., 'NESN.SW', 'BTC')
+  destinationQuantity?: number; // How much you bought
 
   // P4: BUY/SELL transaction linking (for buy asset with another asset transactions)
   linkedBuySellTransactionId?: string; // Links BUY transaction to corresponding SELL transaction in source asset (and vice versa)

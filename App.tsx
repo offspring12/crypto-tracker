@@ -1800,8 +1800,8 @@ const App: React.FC = () => {
     pricePerCoinOrQtyReceived: number,
     date: string,
     proceedsCurrency: string,
-    tag?: TransactionTag,
-    isCryptoToCrypto?: boolean
+    isCryptoToCrypto: boolean,
+    tag?: TransactionTag
   ) => {
     try {
       const sellTransactionId = Math.random().toString(36).substr(2, 9);
@@ -2063,12 +2063,12 @@ const App: React.FC = () => {
                   new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime()
                 );
 
-                const updatedTxs = a.transactions.map((tx) => {
+                const updatedTxs = a.transactions.map((tx): Transaction => {
                   // Update the most recent transaction to be a DEPOSIT with correct currency
                   if (tx.id === sortedTxs[0]?.id) {
                     return {
                       ...tx,
-                      type: 'DEPOSIT',
+                      type: 'DEPOSIT' as const,
                       depositSource,
                       costBasis,
                       purchaseCurrency: purchaseCurrency,
@@ -3165,7 +3165,7 @@ const App: React.FC = () => {
         <SellModal
           asset={sellModalAsset}
           onSell={(qty, price, date, currency, tag, isCryptoToCrypto) =>
-            handleSellAsset(sellModalAsset, qty, price, date, currency, tag, isCryptoToCrypto)
+            handleSellAsset(sellModalAsset, qty, price, date, currency, isCryptoToCrypto || false, tag)
           }
           onClose={() => setSellModalAsset(null)}
           displayCurrency={displayCurrency}
