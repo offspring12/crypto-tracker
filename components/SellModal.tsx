@@ -13,14 +13,29 @@ interface SellModalProps {
   exchangeRates: Record<string, number>;
 }
 
-// Common stablecoins and major cryptos for proceeds selection
+// Common stablecoins, major cryptos, and fiat for proceeds selection
 const CRYPTO_PROCEEDS_OPTIONS = [
   { value: 'USDT', label: 'USDT (Tether)', category: 'Stablecoin' },
   { value: 'USDC', label: 'USDC (USD Coin)', category: 'Stablecoin' },
   { value: 'DAI', label: 'DAI (Dai Stablecoin)', category: 'Stablecoin' },
-  { value: 'BTC', label: 'BTC (Bitcoin)', category: 'Major' },
-  { value: 'ETH', label: 'ETH (Ethereum)', category: 'Major' },
-  { value: 'SOL', label: 'SOL (Solana)', category: 'Major' },
+  { value: 'USD', label: 'USD (US Dollar)', category: 'Fiat' },
+  { value: 'EUR', label: 'EUR (Euro)', category: 'Fiat' },
+  { value: 'CHF', label: 'CHF (Swiss Franc)', category: 'Fiat' },
+  { value: 'GBP', label: 'GBP (British Pound)', category: 'Fiat' },
+  { value: 'BTC', label: 'BTC (Bitcoin)', category: 'Major Crypto' },
+  { value: 'ETH', label: 'ETH (Ethereum)', category: 'Major Crypto' },
+  { value: 'SOL', label: 'SOL (Solana)', category: 'Major Crypto' },
+];
+
+// Fiat currency options for fiat-to-fiat exchanges
+const FIAT_PROCEEDS_OPTIONS = [
+  { value: 'USD', label: 'USD (US Dollar)' },
+  { value: 'EUR', label: 'EUR (Euro)' },
+  { value: 'CHF', label: 'CHF (Swiss Franc)' },
+  { value: 'GBP', label: 'GBP (British Pound)' },
+  { value: 'JPY', label: 'JPY (Japanese Yen)' },
+  { value: 'CAD', label: 'CAD (Canadian Dollar)' },
+  { value: 'AUD', label: 'AUD (Australian Dollar)' },
 ];
 
 export const SellModal: React.FC<SellModalProps> = ({
@@ -55,15 +70,26 @@ export const SellModal: React.FC<SellModalProps> = ({
   // P2: Determine if proceeds currency is a major crypto (not a stablecoin or fiat)
   const isCryptoToCrypto = isCryptoAsset && ['BTC', 'ETH', 'SOL'].includes(proceedsCurrency);
 
+  // Fiat-to-fiat exchanges should use quantity received (like crypto-to-crypto)
+  const isFiatToFiat = isFiatAsset && ['USD', 'CHF', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD'].includes(proceedsCurrency);
+
+  // Use quantity received input for both crypto-to-crypto AND fiat-to-fiat
+  const useQuantityReceivedInput = isCryptoToCrypto || isFiatToFiat;
+
   // Initialize proceeds currency based on asset type
   useEffect(() => {
     if (isCryptoAsset) {
       // Default to USDT for crypto
       setProceedsCurrency('USDT');
-    } else if (isStockAsset || isFiatAsset) {
-      // For stocks and FIAT, use native currency
+    } else if (isStockAsset) {
+      // For stocks, use native currency (stocks must be sold for their native fiat)
       const nativeCurrency = detectAssetNativeCurrency(asset.ticker);
       setProceedsCurrency(nativeCurrency);
+    } else if (isFiatAsset) {
+      // For fiat, default to a different currency (first available that isn't the source)
+      const currentTicker = asset.ticker.toUpperCase();
+      const defaultFiat = FIAT_PROCEEDS_OPTIONS.find(opt => opt.value !== currentTicker);
+      setProceedsCurrency(defaultFiat?.value || 'USD');
     }
   }, [isCryptoAsset, isStockAsset, isFiatAsset, asset.ticker]);
 
@@ -72,19 +98,19 @@ export const SellModal: React.FC<SellModalProps> = ({
   const priceNum = parseFloat(pricePerCoin) || 0;
   const qtyReceivedNum = parseFloat(quantityReceived) || 0;
 
-  // P2: For crypto-to-crypto, we derive price from quantity received
-  // For stablecoins/fiat, we use the direct price
-  const effectivePrice = isCryptoToCrypto && qtyNum > 0 ? qtyReceivedNum / qtyNum : priceNum;
-  const totalProceeds = isCryptoToCrypto ? qtyReceivedNum : qtyNum * priceNum;
+  // For quantity-received mode (crypto-to-crypto or fiat-to-fiat), we derive price from quantity received
+  // For price-per-unit mode (crypto-to-stablecoin, stock sales), we use the direct price
+  const effectivePrice = useQuantityReceivedInput && qtyNum > 0 ? qtyReceivedNum / qtyNum : priceNum;
+  const totalProceeds = useQuantityReceivedInput ? qtyReceivedNum : qtyNum * priceNum;
 
-  // P2: P&L calculation only makes sense for stablecoins/fiat (same currency comparison)
-  // For crypto-to-crypto, P&L can't be calculated directly (comparing BTC to ETH doesn't make sense)
-  const estimatedPnL = isCryptoToCrypto ? 0 : (effectivePrice - asset.avgBuyPrice) * qtyNum;
-  const estimatedPnLPercent = isCryptoToCrypto ? 0 : (asset.avgBuyPrice > 0 ? ((effectivePrice - asset.avgBuyPrice) / asset.avgBuyPrice) * 100 : 0);
+  // P&L calculation only makes sense when selling to same-currency stablecoins/fiat
+  // For crypto-to-crypto or fiat-to-fiat, P&L can't be calculated directly (comparing BTC to ETH or CHF to EUR doesn't make sense)
+  const estimatedPnL = useQuantityReceivedInput ? 0 : (effectivePrice - asset.avgBuyPrice) * qtyNum;
+  const estimatedPnLPercent = useQuantityReceivedInput ? 0 : (asset.avgBuyPrice > 0 ? ((effectivePrice - asset.avgBuyPrice) / asset.avgBuyPrice) * 100 : 0);
 
   // Validation
   const canSell = qtyNum > 0 && qtyNum <= asset.quantity &&
-                  (isCryptoToCrypto ? qtyReceivedNum > 0 : priceNum > 0);
+                  (useQuantityReceivedInput ? qtyReceivedNum > 0 : priceNum > 0);
   const isPartialSell = qtyNum > 0 && qtyNum < asset.quantity;
   const isFullSell = qtyNum === asset.quantity;
 
@@ -94,9 +120,11 @@ export const SellModal: React.FC<SellModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      // P2: For crypto-to-crypto, pass quantity received; otherwise pass price
-      const valueToPass = isCryptoToCrypto ? qtyReceivedNum : priceNum;
-      await onSell(qtyNum, valueToPass, date, proceedsCurrency, tag, isCryptoToCrypto);
+      // For quantity-received mode (crypto-to-crypto or fiat-to-fiat), pass quantity received
+      // Otherwise pass price per unit
+      const valueToPass = useQuantityReceivedInput ? qtyReceivedNum : priceNum;
+      // Pass useQuantityReceivedInput as the flag (replaces isCryptoToCrypto)
+      await onSell(qtyNum, valueToPass, date, proceedsCurrency, tag, useQuantityReceivedInput);
       onClose();
     } catch (error) {
       console.error('Sell failed:', error);
@@ -203,9 +231,18 @@ export const SellModal: React.FC<SellModalProps> = ({
                       </option>
                     ))}
                 </optgroup>
+                <optgroup label="Fiat Currencies">
+                  {CRYPTO_PROCEEDS_OPTIONS
+                    .filter(opt => opt.category === 'Fiat')
+                    .map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                </optgroup>
                 <optgroup label="Major Cryptos">
                   {CRYPTO_PROCEEDS_OPTIONS
-                    .filter(opt => opt.category === 'Major')
+                    .filter(opt => opt.category === 'Major Crypto')
                     .map(opt => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}
@@ -234,11 +271,39 @@ export const SellModal: React.FC<SellModalProps> = ({
             </div>
           )}
 
-          {/* P2: Conditionally show Price or Quantity Received */}
-          {isCryptoToCrypto ? (
-            /* Quantity Received (for crypto-to-crypto) */
+          {/* Proceeds Currency for Fiat - Allow fiat-to-fiat exchanges */}
+          {isFiatAsset && (
             <div>
-              <label className="block text-sm text-slate-300 mb-2">Quantity of {proceedsCurrency} Received *</label>
+              <label className="block text-sm text-slate-300 mb-2">
+                Sell to (Proceeds Currency) *
+              </label>
+              <select
+                value={proceedsCurrency}
+                onChange={(e) => setProceedsCurrency(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none"
+                required
+              >
+                {FIAT_PROCEEDS_OPTIONS
+                  .filter(opt => opt.value !== asset.ticker.toUpperCase())
+                  .map(opt => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Choose which currency you're exchanging to
+              </p>
+            </div>
+          )}
+
+          {/* Conditionally show Price or Quantity Received based on transaction type */}
+          {useQuantityReceivedInput ? (
+            /* Quantity Received (for crypto-to-crypto OR fiat-to-fiat) */
+            <div>
+              <label className="block text-sm text-slate-300 mb-2">
+                {isFiatToFiat ? `Amount of ${proceedsCurrency} Received *` : `Quantity of ${proceedsCurrency} Received *`}
+              </label>
               <div className="relative">
                 <input
                   type="number"
@@ -252,7 +317,10 @@ export const SellModal: React.FC<SellModalProps> = ({
                 />
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                How many {proceedsCurrency} did you receive for this sale?
+                {isFiatToFiat
+                  ? `How much ${proceedsCurrency} did you receive? (Check your exchange rate)`
+                  : `How many ${proceedsCurrency} did you receive for this sale?`
+                }
               </p>
             </div>
           ) : (
@@ -308,10 +376,10 @@ export const SellModal: React.FC<SellModalProps> = ({
           <div className="bg-slate-900/50 rounded-lg p-4 space-y-2 border border-slate-700">
             <div className="flex justify-between text-sm">
               <span className="text-slate-400">
-                {isCryptoToCrypto ? 'You Will Receive:' : 'Total Proceeds:'}
+                {useQuantityReceivedInput ? 'You Will Receive:' : 'Total Proceeds:'}
               </span>
               <span className="text-white font-bold">
-                {isCryptoToCrypto
+                {useQuantityReceivedInput
                   ? `${totalProceeds.toLocaleString('en-US', {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 8
@@ -323,8 +391,17 @@ export const SellModal: React.FC<SellModalProps> = ({
                 }
               </span>
             </div>
-            {/* P2: Only show P&L for stablecoin/fiat sells (not crypto-to-crypto) */}
-            {!isCryptoToCrypto && (
+            {/* Show exchange rate for fiat-to-fiat */}
+            {isFiatToFiat && qtyNum > 0 && qtyReceivedNum > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Exchange Rate:</span>
+                <span className="text-white">
+                  1 {asset.ticker} = {(qtyReceivedNum / qtyNum).toFixed(4)} {proceedsCurrency}
+                </span>
+              </div>
+            )}
+            {/* Only show P&L for price-per-unit mode (not quantity-received mode) */}
+            {!useQuantityReceivedInput && (
               <div className="flex justify-between text-sm">
                 <span className="text-slate-400">Estimated P&L:</span>
                 <span className={`font-bold ${estimatedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>

@@ -51,9 +51,10 @@ export function calculateRealizedPnL(
   closedPositions: ClosedPosition[];
   remainingTransactions: Transaction[];
 } {
-  // Sort BUY transactions by date (FIFO)
-  const buyTransactions = [...asset.transactions]
-    .filter(tx => tx.type === 'BUY')
+  // Sort acquisition transactions by date (FIFO)
+  // Include BUY, DEPOSIT, and INCOME as valid acquisition methods
+  const acquisitionTransactions = [...asset.transactions]
+    .filter(tx => tx.type === 'BUY' || tx.type === 'DEPOSIT' || tx.type === 'INCOME')
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   let remainingToSell = sellQuantity;
@@ -62,7 +63,7 @@ export function calculateRealizedPnL(
   const closedPositions: ClosedPosition[] = [];
   const remainingTransactions: Transaction[] = [];
 
-  for (const tx of buyTransactions) {
+  for (const tx of acquisitionTransactions) {
     if (remainingToSell <= 0) {
       // This transaction wasn't touched, keep it as-is
       remainingTransactions.push(tx);

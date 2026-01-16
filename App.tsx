@@ -2433,37 +2433,87 @@ const App: React.FC = () => {
       }
 
       // P3 FIX: Calculate closed positions for the source asset being sold
+      // Use the actual destination currency for proceeds (not always USD)
       let closedPositionsFromSell: any[] = [];
       if (sourceAsset) {
+        // Determine the actual sale/proceeds currency
+        // For stocks/crypto being sold, the proceeds currency is the destination ticker
+        const actualProceedsCurrency = destCurrency; // CHF for Swiss stocks, USD for US stocks, etc.
+
+        // Calculate sale price in the proceeds currency (not USD)
+        // sourceMarketPriceOnDate is already in the source asset's native currency
+        const salePriceInProceedsCurrency = sourceMarketPriceOnDate;
+
         pnlResult = calculateRealizedPnL(
           sourceAsset,
           sourceQuantity,
-          sourceMarketPriceOnDate, // Market price per coin on transaction date
-          'USD', // Proceeds currency
+          salePriceInProceedsCurrency, // Market price in proceeds currency
+          actualProceedsCurrency, // Actual proceeds currency (CHF, USD, etc.)
           date,
           displayCurrency,
           historicalRates || exchangeRates,
           tag,
           sellTxId,
-          costBasisSpentUSD // USD value of what's being sold (market value)
+          undefined // Don't pass USD value - let the function calculate P&L in the correct currency
         );
         closedPositionsFromSell = pnlResult.closedPositions;
-        console.log(`📊 Created ${closedPositionsFromSell.length} closed positions for BUY transaction`);
+        console.log(`📊 Created ${closedPositionsFromSell.length} closed positions for BUY transaction (proceeds in ${actualProceedsCurrency})`);
       }
 
       // Create BUY transaction for destination asset
-      // Store ORIGINAL source currency values for display (e.g., 70 CHF)
-      // The USD conversion is only used internally for P&L calculations
+      // Handle different destination types:
+      // 1. Cash/stablecoins (USDT, USD, etc.): price = 1.0, totalCost = quantity
+      // 2. Crypto (ETH, SOL, etc.): price = USD value of source / quantity, totalCost = USD value
+      // 3. Stocks/other: use source currency values
+      const isDestinationCash = isCashAsset(destinationTicker);
+      const isDestinationCrypto = !isDestinationCash && !destinationTicker.includes('.'); // Not cash and not a stock
+
+      // Calculate the USD value of what was spent (for crypto-to-crypto)
+      // costBasisSpentUSD was already calculated above as: sourceQuantity * sourceMarketPriceOnDate
+      // But we need to ensure it's properly converted to USD
+      let sourceValueInUSD = costBasisSpentUSD;
+      if (sourceAsset && sourceCurrency !== 'USD') {
+        // Convert to USD using historical rates if available
+        sourceValueInUSD = convertCurrencySync(
+          sourceQuantity * sourceMarketPriceOnDate,
+          sourceCurrency,
+          'USD',
+          historicalRates || exchangeRates
+        );
+      }
+
+      let buyTxPricePerCoin: number;
+      let buyTxTotalCost: number;
+      let buyTxPurchaseCurrency: Currency;
+
+      if (isDestinationCash) {
+        // Cash/stablecoins: price = 1.0, totalCost = quantity (in USD for stablecoins)
+        buyTxPricePerCoin = 1.0;
+        buyTxTotalCost = destinationQuantity;
+        buyTxPurchaseCurrency = ['USDT', 'USDC', 'DAI'].includes(destinationTicker.toUpperCase()) ? 'USD' : destCurrency;
+      } else if (isDestinationCrypto) {
+        // Crypto-to-crypto: use USD value of source as cost basis
+        // e.g., 0.1 BTC @ $94,773 = $9,477 USD → 3.5 ETH → cost per ETH = $2,707.81
+        buyTxPricePerCoin = destinationQuantity > 0 ? sourceValueInUSD / destinationQuantity : 0;
+        buyTxTotalCost = sourceValueInUSD;
+        buyTxPurchaseCurrency = 'USD'; // Crypto cost basis is tracked in USD
+      } else {
+        // Stocks/other: use source currency values
+        buyTxPricePerCoin = destinationQuantity > 0 ? sourceQuantity / destinationQuantity : 0;
+        buyTxTotalCost = sourceQuantity;
+        buyTxPurchaseCurrency = sourceCurrency;
+      }
+
       const buyTx: Transaction = {
         id: buyTxId,
         type: 'BUY',
         quantity: destinationQuantity,
-        pricePerCoin: destinationQuantity > 0 ? sourceQuantity / destinationQuantity : 0, // Original: 70 CHF / 1 = 70 CHF per unit
+        pricePerCoin: buyTxPricePerCoin,
         date,
-        totalCost: sourceQuantity, // Original amount paid (e.g., 70 CHF)
+        totalCost: buyTxTotalCost,
         tag: tag || 'DCA',
         createdAt: new Date().toISOString(),
-        purchaseCurrency: sourceCurrency, // Original currency (CHF, not USD)
+        purchaseCurrency: buyTxPurchaseCurrency,
         exchangeRateAtPurchase: historicalRates,
         sourceTicker,
         sourceQuantity,
@@ -2480,6 +2530,9 @@ const App: React.FC = () => {
         const sellPricePerCoin = isCash ? 1.00 : sourceMarketPriceOnDate;
         const sellTotalCost = isCash ? (sourceQuantity * 1.00) : costBasisFIFOinUSD;
 
+        // Calculate proceeds in the actual sale currency (not always USD)
+        const proceedsInSaleCurrency = sourceQuantity * sourceMarketPriceOnDate;
+
         const sellTx: Transaction = {
           id: sellTxId,
           type: 'SELL',
@@ -2487,8 +2540,8 @@ const App: React.FC = () => {
           pricePerCoin: sellPricePerCoin, // 1.00 for cash, market price for crypto/stocks
           date,
           totalCost: sellTotalCost, // For cash: qty × 1.00, for crypto: FIFO cost basis
-          proceeds: costBasisSpentUSD, // P1 FIX: Proceeds = market value in USD
-          proceedsCurrency: 'USD', // P1 FIX: Use USD as common currency
+          proceeds: proceedsInSaleCurrency, // Proceeds in the actual sale currency
+          proceedsCurrency: destCurrency, // Actual currency (CHF for Swiss stocks, USD for crypto, etc.)
           tag: tag || 'DCA',
           createdAt: new Date().toISOString(),
           destinationTicker,
@@ -2591,21 +2644,25 @@ const App: React.FC = () => {
         // Create new destination asset directly with our buyTx (preserves linking)
         const newDestAssetId = Math.random().toString(36).substr(2, 9);
 
+        // For cash/stablecoin assets, set price to 1.0 and appropriate asset type
+        const newAssetCurrentPrice = isDestinationCash ? 1.0 : 0;
+        const newAssetType = isDestinationCash ? 'CASH' : undefined;
+
         // First create the asset with the properly linked buyTx
         const newDestAsset: Asset = {
           id: newDestAssetId,
           ticker: destinationTicker,
           name: undefined, // Will be fetched
           quantity: destinationQuantity,
-          currentPrice: 0, // Will be fetched
+          currentPrice: newAssetCurrentPrice,
           lastUpdated: new Date().toISOString(),
           sources: [],
-          isUpdating: true,
+          isUpdating: !isDestinationCash, // Cash doesn't need price fetch
           transactions: [buyTx], // Use our buyTx with linking intact!
           avgBuyPrice: buyTx.pricePerCoin,
           totalCostBasis: buyTx.totalCost,
-          assetType: undefined, // Will be auto-detected by API
-          currency: destCurrency
+          assetType: newAssetType,
+          currency: buyTxPurchaseCurrency
         };
 
         updateActivePortfolio(portfolio => ({
@@ -2613,34 +2670,36 @@ const App: React.FC = () => {
           assets: [...portfolio.assets, newDestAsset]
         }));
 
-        // Now fetch price and history for the new asset
-        try {
-          const result = await fetchCryptoPrice(destinationTicker);
-          updateActivePortfolio(portfolio => ({
-            ...portfolio,
-            assets: portfolio.assets.map(a => a.id === newDestAssetId ? {
-              ...a,
-              currentPrice: result.price,
-              sources: result.sources,
-              isUpdating: false,
-              name: result.name || result.symbol || a.name,
-              assetType: result.assetType || 'CRYPTO',
-              currency: result.currency || destCurrency
-            } : a)
-          }));
-
-          const historyData = await fetchAssetHistory(destinationTicker, result.price, result.symbol, result.assetType);
-          if (historyData) {
+        // Fetch price and history for non-cash assets only
+        if (!isDestinationCash) {
+          try {
+            const result = await fetchCryptoPrice(destinationTicker);
             updateActivePortfolio(portfolio => ({
               ...portfolio,
-              assets: portfolio.assets.map(a => a.id === newDestAssetId ? { ...a, priceHistory: historyData } : a)
+              assets: portfolio.assets.map(a => a.id === newDestAssetId ? {
+                ...a,
+                currentPrice: result.price,
+                sources: result.sources,
+                isUpdating: false,
+                name: result.name || result.symbol || a.name,
+                assetType: result.assetType || 'CRYPTO',
+                currency: result.currency || destCurrency
+              } : a)
+            }));
+
+            const historyData = await fetchAssetHistory(destinationTicker, result.price, result.symbol, result.assetType);
+            if (historyData) {
+              updateActivePortfolio(portfolio => ({
+                ...portfolio,
+                assets: portfolio.assets.map(a => a.id === newDestAssetId ? { ...a, priceHistory: historyData } : a)
+              }));
+            }
+          } catch (error: any) {
+            updateActivePortfolio(portfolio => ({
+              ...portfolio,
+              assets: portfolio.assets.map(a => a.id === newDestAssetId ? { ...a, isUpdating: false, error: error.message || 'Failed' } : a)
             }));
           }
-        } catch (error: any) {
-          updateActivePortfolio(portfolio => ({
-            ...portfolio,
-            assets: portfolio.assets.map(a => a.id === newDestAssetId ? { ...a, isUpdating: false, error: error.message || 'Failed' } : a)
-          }));
         }
 
         console.log(`✅ Created new position: ${destinationQuantity} ${destinationTicker} with ${sourceQuantity} ${sourceTicker} (buyTxId: ${buyTx.id})`);
@@ -3163,13 +3222,41 @@ const App: React.FC = () => {
         onDeletePortfolio={handleDeletePortfolio}
       />
 
-      {/* P2: Sell Modal */}
+      {/* P2: Sell Modal - Now routes through unified buy transaction logic */}
       {sellModalAsset && (
         <SellModal
           asset={sellModalAsset}
-          onSell={(qty, price, date, currency, tag, isCryptoToCrypto) =>
-            handleSellAsset(sellModalAsset, qty, price, date, currency, isCryptoToCrypto || false, tag)
-          }
+          onSell={async (qty, priceOrQtyReceived, date, proceedsCurrency, tag, isCryptoToCrypto) => {
+            // Transform SELL into BUY: "Sell X of A for B" = "Buy B with X of A"
+            // sourceTicker = asset being sold
+            // sourceQuantity = quantity being sold
+            // destinationTicker = proceeds currency (what we're receiving)
+            // destinationQuantity = how much we receive
+
+            let destinationQuantity: number;
+
+            if (isCryptoToCrypto) {
+              // For crypto-to-crypto, priceOrQtyReceived IS the quantity received
+              destinationQuantity = priceOrQtyReceived;
+            } else {
+              // For stablecoin/fiat, priceOrQtyReceived is price per unit
+              // Total proceeds = qty * price, and for fiat/stablecoins, proceeds = quantity
+              destinationQuantity = qty * priceOrQtyReceived;
+            }
+
+            // Route through unified buy transaction logic
+            await handleBuyWithValidation(
+              sellModalAsset.ticker,  // sourceTicker (what we're spending)
+              qty,                     // sourceQuantity (how much we're spending)
+              proceedsCurrency,        // destinationTicker (what we're receiving)
+              destinationQuantity,     // destinationQuantity (how much we receive)
+              date,
+              tag
+            );
+
+            // Close modal on success
+            setSellModalAsset(null);
+          }}
           onClose={() => setSellModalAsset(null)}
           displayCurrency={displayCurrency}
           exchangeRates={exchangeRates}
@@ -3182,7 +3269,7 @@ const App: React.FC = () => {
           onClose={() => setIsTransactionModalOpen(false)}
           onDeposit={handleDeposit}
           onBuy={handleBuyWithValidation}
-          onSell={handleSellAsset}
+          onSell={handleBuyWithValidation}  // Unified: sell now routes through buy logic
           onWithdraw={handleWithdrawal}
           onTransfer={handlePortfolioTransfer}
           onIncome={handleIncome}

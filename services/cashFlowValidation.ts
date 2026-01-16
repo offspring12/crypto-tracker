@@ -150,19 +150,20 @@ export function validateBuyTransaction(
     };
   }
 
-  // 3. Check if there's a deposit/income before the buy date
+  // 3. Check if there's an acquisition (deposit/income/buy) before or on the buy date
   // Compare dates only (ignore time component to avoid timezone issues)
   const buyDateOnly = new Date(buyDate).toISOString().split('T')[0];
 
-  const hasDepositBefore = sourceAsset.transactions.some(
+  const hasAcquisitionBefore = sourceAsset.transactions.some(
     tx => {
-      if (tx.type !== 'DEPOSIT' && tx.type !== 'INCOME') return false;
+      // Any acquisition type counts (DEPOSIT, INCOME, or BUY from another asset)
+      if (tx.type !== 'DEPOSIT' && tx.type !== 'INCOME' && tx.type !== 'BUY') return false;
       const txDateOnly = new Date(tx.date).toISOString().split('T')[0];
       return txDateOnly <= buyDateOnly;
     }
   );
 
-  if (!hasDepositBefore) {
+  if (!hasAcquisitionBefore) {
     return {
       valid: false,
       error: `No ${sourceTicker} deposit exists before ${new Date(buyDate).toLocaleDateString('en-US', {

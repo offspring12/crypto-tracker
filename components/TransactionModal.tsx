@@ -12,7 +12,8 @@ interface TransactionModalProps {
   onClose: () => void;
   onDeposit: (ticker: string, quantity: number, costBasis: number, date: string, depositSource: string, tag?: TransactionTag) => Promise<void>;
   onBuy: (sourceTicker: string, sourceQuantity: number, destinationTicker: string, destinationQuantity: number, date: string, tag?: TransactionTag) => Promise<void>;
-  onSell: (asset: Asset, quantity: number, pricePerCoinOrQtyReceived: number, date: string, proceedsCurrency: string, isCryptoToCrypto: boolean, tag?: TransactionTag) => Promise<void>;
+  // onSell is now unified with onBuy - it accepts the same parameters (sourceTicker, sourceQty, destTicker, destQty, date, tag)
+  onSell: (sourceTicker: string, sourceQuantity: number, destinationTicker: string, destinationQuantity: number, date: string, tag?: TransactionTag) => Promise<void>;
   onWithdraw: (asset: Asset, quantity: number, date: string, withdrawalDestination: string, tag?: TransactionTag) => void;
   onTransfer: (asset: Asset, quantity: number, date: string, destinationPortfolioId: string, tag?: TransactionTag) => void;
   onIncome: (ticker: string, quantity: number, date: string, incomeType: 'dividend' | 'staking' | 'airdrop' | 'interest', incomeSource: string, tag?: TransactionTag) => Promise<void>;
@@ -56,9 +57,30 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       {selectedSellAsset && (
         <SellModal
           asset={selectedSellAsset}
-          onSell={async (quantity, priceOrQty, date, proceedsCurrency, tag, isCryptoToCrypto) => {
-            await onSell(selectedSellAsset, quantity, priceOrQty, date, proceedsCurrency, isCryptoToCrypto || false, tag);
+          onSell={async (quantity, priceOrQtyReceived, date, proceedsCurrency, tag, isCryptoToCrypto) => {
+            // Transform SELL into BUY parameters: "Sell X of A for B" = "Buy B with X of A"
+            let destinationQuantity: number;
+
+            if (isCryptoToCrypto) {
+              // For crypto-to-crypto, priceOrQtyReceived IS the quantity received
+              destinationQuantity = priceOrQtyReceived;
+            } else {
+              // For stablecoin/fiat, priceOrQtyReceived is price per unit
+              // Total proceeds = qty * price, and for fiat/stablecoins, proceeds = quantity
+              destinationQuantity = quantity * priceOrQtyReceived;
+            }
+
+            // Route through unified buy transaction logic
+            await onSell(
+              selectedSellAsset.ticker,  // sourceTicker (what we're spending/selling)
+              quantity,                   // sourceQuantity (how much we're selling)
+              proceedsCurrency,           // destinationTicker (what we're receiving)
+              destinationQuantity,        // destinationQuantity (how much we receive)
+              date,
+              tag
+            );
             setSelectedSellAsset(null);
+            onClose(); // Also close the main TransactionModal
           }}
           onClose={() => setSelectedSellAsset(null)}
           displayCurrency={displayCurrency}
