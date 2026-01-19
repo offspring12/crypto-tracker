@@ -308,3 +308,88 @@ export interface RiskAlert {
   title: string;
   message: string;
 }
+
+// ============================================================================
+// REBALANCING TYPES
+// ============================================================================
+
+/**
+ * User-configurable rebalancing settings
+ */
+export interface RebalancingSettings {
+  deviationThreshold: number;    // Minimum deviation % to trigger suggestion (default: 3%)
+  minTradeAmount: number;        // Minimum trade amount in display currency (default: 100)
+}
+
+/**
+ * Allocation deviation for a single asset
+ */
+export interface AllocationDeviation {
+  assetId: string;
+  ticker: string;
+  name: string;
+  currentValue: number;          // Current value in display currency
+  currentAllocation: number;     // Current allocation as percentage (0-100)
+  targetAllocation: number;      // Target allocation as percentage (0-100)
+  deviation: number;             // currentAllocation - targetAllocation
+  deviationAmount: number;       // Deviation in display currency (positive = overweight)
+  status: 'overweight' | 'underweight' | 'on-target';
+}
+
+/**
+ * A single suggested rebalancing trade (sell → buy pair)
+ */
+export interface RebalancingTrade {
+  id: string;
+  priority: number;              // 1 = highest priority (largest deviation)
+
+  // Sell side
+  sellTicker: string;
+  sellName: string;
+  sellAmount: number;            // Amount in display currency
+  sellQuantity: number;          // Quantity of asset to sell
+  sellCurrentPrice: number;      // Current price per unit
+
+  // Buy side
+  buyTicker: string;
+  buyName: string;
+  buyAmount: number;             // Amount in display currency (should match sellAmount)
+  buyQuantity: number;           // Quantity of asset to buy
+  buyCurrentPrice: number;       // Current price per unit
+}
+
+/**
+ * Complete rebalancing suggestion result
+ */
+export interface RebalancingSuggestion {
+  // Portfolio context
+  portfolioId: string;
+  totalPortfolioValue: number;   // In display currency
+  displayCurrency: Currency;
+  calculatedAt: string;          // ISO timestamp
+
+  // Settings used for calculation
+  settings: RebalancingSettings;
+
+  // Allocation analysis
+  deviations: AllocationDeviation[];
+  assetsWithoutTarget: number;   // Count of assets with no target allocation
+
+  // Suggested trades
+  trades: RebalancingTrade[];
+  totalRebalanceAmount: number;  // Total value to be rebalanced in display currency
+
+  // Summary counts
+  overweightCount: number;
+  underweightCount: number;
+  onTargetCount: number;
+
+  // Projected allocations after rebalancing
+  projectedAllocations: Array<{
+    ticker: string;
+    name: string;
+    beforeAllocation: number;
+    afterAllocation: number;
+    targetAllocation: number;
+  }>;
+}

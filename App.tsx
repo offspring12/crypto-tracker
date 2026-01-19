@@ -2972,6 +2972,7 @@ const App: React.FC = () => {
           displayCurrency={displayCurrency}
           setDisplayCurrency={setDisplayCurrency}
           exchangeRates={exchangeRates}
+          portfolioId={activePortfolio?.id || ''}
         />
         
         {/* P1.1 NEW: Add TagAnalytics component */}

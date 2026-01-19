@@ -1,7 +1,9 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { PortfolioSummary, Asset, Currency, ClosedPosition } from '../types';
 import { fetchExchangeRates, convertCurrencySync, fetchHistoricalExchangeRates, convertCurrencySyncHistorical } from '../services/currencyService';
-import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle } from 'lucide-react';
+import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle, Scale } from 'lucide-react';
+import { getRebalancingAlertCount, DEFAULT_REBALANCING_SETTINGS } from '../services/rebalancingService';
+import { RebalancingModal } from './RebalancingModal';
 
 // P1.1 CHANGE: Updated interface to receive displayCurrency and exchangeRates as props
 interface SummaryProps {
@@ -13,6 +15,7 @@ interface SummaryProps {
   displayCurrency: Currency;
   setDisplayCurrency: (currency: Currency) => void;
   exchangeRates: Record<string, number>;
+  portfolioId: string; // For rebalancing modal
 }
 
 const CHART_COLORS = [
@@ -60,11 +63,13 @@ export const Summary: React.FC<SummaryProps> = ({
   isGlobalLoading,
   displayCurrency,
   setDisplayCurrency,
-  exchangeRates
+  exchangeRates,
+  portfolioId
 }) => {
   const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
+  const [showRebalancingModal, setShowRebalancingModal] = useState(false);
   const [hoverData, setHoverData] = useState<{ x: number, y: number, data: ChartDataPoint } | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [showAllAssets, setShowAllAssets] = useState(false);
@@ -72,6 +77,12 @@ export const Summary: React.FC<SummaryProps> = ({
   // P1.1 CHANGE: Remove local displayCurrency and exchangeRates state - now using props
   // P1.1 CHANGE: Keep ratesLoaded based on whether exchangeRates has data
   const ratesLoaded = Object.keys(exchangeRates).length > 0;
+
+  // Calculate rebalancing alert count for badge
+  const rebalancingAlertCount = useMemo(() => {
+    if (!ratesLoaded) return 0;
+    return getRebalancingAlertCount(assets, displayCurrency, exchangeRates, DEFAULT_REBALANCING_SETTINGS);
+  }, [assets, displayCurrency, exchangeRates, ratesLoaded]);
   
   const [historicalRates, setHistoricalRates] = useState<Record<string, Record<string, number>>>({});
   const [historicalRatesLoaded, setHistoricalRatesLoaded] = useState(false);
@@ -352,32 +363,52 @@ export const Summary: React.FC<SummaryProps> = ({
             asset.transactions.forEach(tx => {
                const txTime = new Date(tx.date).getTime();
                if (txTime <= t) {
-                   qtyAtTime += tx.quantity;
+                   // FIX: SELL and WITHDRAWAL transactions reduce quantity, others increase
+                   if (tx.type === 'SELL' || tx.type === 'WITHDRAWAL') {
+                     qtyAtTime -= tx.quantity;
+                   } else {
+                     qtyAtTime += tx.quantity;
+                   }
 
-                   // P2: Skip SELL transactions - they don't contribute to cost basis
+                   // Cost basis logic: Only external capital flows affect the "total invested" line
+                   // - DEPOSIT: adds (money coming in)
+                   // - INCOME: adds (value coming in - dividends, staking, etc.)
+                   // - WITHDRAWAL: subtracts (money going out)
+                   // - TRANSFER: destination portfolio adds (via transferredFrom flag)
+                   // - BUY/SELL: no change (internal reshuffling of existing capital)
+
+                   // Skip BUY and SELL - they're internal reshuffling, not new capital
                    if (tx.type === 'SELL') return;
+                   if (tx.type === 'BUY') return;
 
-                   // P1.1B CHANGE: Convert each transaction's cost directly to display currency
-                   // using its HISTORICAL rate from purchase date
+                   // Calculate cost in display currency
+                   let costInDisplay = 0;
                    if (tx.exchangeRateAtPurchase && tx.purchaseCurrency) {
-                     const costInDisplay = convertCurrencySync(
+                     costInDisplay = convertCurrencySync(
                        tx.totalCost,
                        tx.purchaseCurrency,
                        displayCurrency,
                        tx.exchangeRateAtPurchase
                      );
-                     costInDisplayAtTime += costInDisplay;
                    } else {
                      // Fallback: convert using current rates
                      const assetCurrency = asset.currency || detectCurrencyFromTicker(asset.ticker);
-                     // P2: Map stablecoins to USD for FX conversion
+                     // Map stablecoins to USD for FX conversion
                      const fxCurrency = ['USDT', 'USDC', 'DAI'].includes(assetCurrency) ? 'USD' : assetCurrency;
-                     const costInDisplay = convertCurrencySync(
+                     costInDisplay = convertCurrencySync(
                        tx.totalCost,
                        fxCurrency,
                        displayCurrency,
                        exchangeRates
                      );
+                   }
+
+                   // Apply cost based on transaction type
+                   if (tx.type === 'WITHDRAWAL') {
+                     // Withdrawal reduces cost basis (money leaving portfolio)
+                     costInDisplayAtTime -= costInDisplay;
+                   } else {
+                     // DEPOSIT, INCOME, TRANSFER (destination) add to cost basis
                      costInDisplayAtTime += costInDisplay;
                    }
                }
@@ -802,9 +833,36 @@ export const Summary: React.FC<SummaryProps> = ({
                      </button>
                    </div>
                  )}
+
+                 {/* Rebalancing Button */}
+                 <div className="mt-4 pt-4 border-t border-slate-700/50">
+                   <button
+                     onClick={() => setShowRebalancingModal(true)}
+                     className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 hover:border-indigo-500/50 rounded-lg transition-all text-sm font-medium text-indigo-300 hover:text-indigo-200"
+                   >
+                     <Scale size={16} />
+                     Rebalance Portfolio
+                     {rebalancingAlertCount > 0 && (
+                       <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold bg-red-500 text-white rounded-full min-w-[18px] text-center">
+                         {rebalancingAlertCount}
+                       </span>
+                     )}
+                   </button>
+                 </div>
             </div>
         </div>
       </div>
+
+      {/* Rebalancing Modal */}
+      {showRebalancingModal && (
+        <RebalancingModal
+          assets={assets}
+          displayCurrency={displayCurrency}
+          exchangeRates={exchangeRates}
+          portfolioId={portfolioId}
+          onClose={() => setShowRebalancingModal(false)}
+        />
+      )}
 
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
           <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
