@@ -151,6 +151,7 @@ export interface Portfolio {
   settings: {
     displayCurrency?: Currency; // Optional: portfolio-level display currency
   };
+  benchmarkSettings?: BenchmarkSettings; // Benchmark comparison settings (per-portfolio)
   createdAt: string;
 }
 
@@ -392,4 +393,88 @@ export interface RebalancingSuggestion {
     afterAllocation: number;
     targetAllocation: number;
   }>;
+}
+
+// ============================================================================
+// BENCHMARK COMPARISON TYPES
+// ============================================================================
+
+/**
+ * Cached benchmark price data fetched from Yahoo Finance
+ */
+export interface BenchmarkData {
+  ticker: string;
+  name: string;
+  priceHistory: number[][];  // Array of [timestamp (ms), price] tuples
+  lastUpdated: number;       // Unix timestamp (ms) when data was fetched
+  currency: string;          // Currency of the benchmark (e.g., 'USD', 'CHF')
+}
+
+/**
+ * Individual benchmark configuration
+ */
+export interface BenchmarkConfig {
+  ticker: string;
+  name: string;
+  color: string;
+  visible: boolean;
+  isCustom: boolean;         // true for user-added benchmarks
+}
+
+/**
+ * Portfolio-level benchmark settings
+ */
+export interface BenchmarkSettings {
+  benchmarks: BenchmarkConfig[];
+  maxVisibleBenchmarks: number;  // Maximum benchmarks visible at once (default: 3)
+}
+
+/**
+ * Default benchmark options available to all portfolios
+ */
+export const DEFAULT_BENCHMARKS: Omit<BenchmarkConfig, 'visible'>[] = [
+  {
+    ticker: '^SSMI',
+    name: 'SMI (Swiss)',
+    color: '#F97316',  // Orange
+    isCustom: false,
+  },
+  {
+    ticker: '^GSPC',
+    name: 'S&P 500',
+    color: '#22C55E',  // Green
+    isCustom: false,
+  },
+  {
+    ticker: 'URTH',
+    name: 'MSCI World',
+    color: '#A855F7',  // Purple
+    isCustom: false,
+  },
+  {
+    ticker: 'BTC-USD',
+    name: 'Bitcoin',
+    color: '#EAB308',  // Yellow
+    isCustom: false,
+  },
+];
+
+/**
+ * Normalized benchmark data point for chart rendering
+ * All values normalized to percentage change from start
+ */
+export interface NormalizedBenchmarkPoint {
+  timestamp: number;
+  percentChange: number;  // Percentage change from starting point
+}
+
+/**
+ * Processed benchmark data ready for chart display
+ */
+export interface ChartBenchmarkData {
+  ticker: string;
+  name: string;
+  color: string;
+  data: NormalizedBenchmarkPoint[];
+  returnPercent: number;  // Total return for the selected period
 }

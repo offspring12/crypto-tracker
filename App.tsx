@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot, TransactionTag, Currency } from './types';
+import { Asset, Portfolio, PortfolioSummary, Transaction, HistorySnapshot, TransactionTag, Currency, BenchmarkSettings, BenchmarkData } from './types';
 import { fetchCryptoPrice, fetchAssetHistory, delay } from './services/geminiService';
 import { fetchExchangeRates, fetchHistoricalExchangeRatesForDate, fetchHistoricalExchangeRates, convertCurrencySync } from './services/currencyService'; // P1.1B CHANGE: Added fetchHistoricalExchangeRatesForDate
 import { AssetCard } from './components/AssetCard';
@@ -16,6 +16,7 @@ import { calculateRealizedPnL, detectAssetNativeCurrency, getHistoricalPrice, is
 import { validateBuyTransaction, validateTransactionDeletion, getBalanceAtDate } from './services/cashFlowValidation'; // P3: Cash Flow Validation
 import { Wallet, Download, Upload, Settings, Key, FolderOpen, Plus, Check } from 'lucide-react';
 import { testPhase1 } from './services/riskMetricsService'; // P1.2 TEST IMPORT
+import { createDefaultBenchmarkSettings, fetchMultipleBenchmarks } from './services/benchmarkService'; // Benchmark comparison
 
 // Portfolio colors for visual distinction
 const PORTFOLIO_COLORS = [
@@ -120,6 +121,11 @@ const App: React.FC = () => {
   // P1.2 NEW: Historical exchange rates for risk metrics
   const [historicalRates, setHistoricalRates] = useState<Record<string, Record<string, number>>>({});
 
+  // Benchmark comparison state
+  const [benchmarkDataMap, setBenchmarkDataMap] = useState<Map<string, BenchmarkData>>(new Map());
+  const [isBenchmarkLoading, setIsBenchmarkLoading] = useState(false);
+  const [benchmarkLoadingTickers, setBenchmarkLoadingTickers] = useState<string[]>([]);
+
   // Get active portfolio
   const activePortfolio = portfolios.find(p => p.id === activePortfolioId) || portfolios[0];
   const assets = activePortfolio?.assets || [];
@@ -156,6 +162,52 @@ const App: React.FC = () => {
       )
     };
   }, [assets, activePortfolio?.closedPositions]);
+
+  // Get benchmark settings for active portfolio (with default initialization)
+  const benchmarkSettings = useMemo((): BenchmarkSettings => {
+    if (activePortfolio?.benchmarkSettings) {
+      return activePortfolio.benchmarkSettings;
+    }
+    return createDefaultBenchmarkSettings();
+  }, [activePortfolio?.benchmarkSettings]);
+
+  // Handle benchmark settings change (stored per-portfolio)
+  const handleBenchmarkSettingsChange = useCallback((newSettings: BenchmarkSettings) => {
+    setPortfolios(prev => prev.map(p => {
+      if (p.id === activePortfolioId) {
+        return { ...p, benchmarkSettings: newSettings };
+      }
+      return p;
+    }));
+  }, [activePortfolioId]);
+
+  // Fetch benchmark data when visible benchmarks change
+  useEffect(() => {
+    const visibleBenchmarks = benchmarkSettings.benchmarks.filter(b => b.visible);
+
+    if (visibleBenchmarks.length === 0) {
+      return;  // No benchmarks to fetch
+    }
+
+    const fetchBenchmarks = async () => {
+      const tickersToFetch = visibleBenchmarks.map(b => b.ticker);
+      setBenchmarkLoadingTickers(tickersToFetch);
+      setIsBenchmarkLoading(true);
+
+      try {
+        const dataMap = await fetchMultipleBenchmarks(visibleBenchmarks, false);
+        setBenchmarkDataMap(dataMap);
+        console.log(`📊 Fetched ${dataMap.size} benchmark(s)`);
+      } catch (error) {
+        console.error('❌ Failed to fetch benchmarks:', error);
+      } finally {
+        setIsBenchmarkLoading(false);
+        setBenchmarkLoadingTickers([]);
+      }
+    };
+
+    fetchBenchmarks();
+  }, [benchmarkSettings.benchmarks]);
 
   useEffect(() => {
     const checkApiKey = () => {
@@ -2973,6 +3025,11 @@ const App: React.FC = () => {
           setDisplayCurrency={setDisplayCurrency}
           exchangeRates={exchangeRates}
           portfolioId={activePortfolio?.id || ''}
+          benchmarkSettings={benchmarkSettings}
+          onBenchmarkSettingsChange={handleBenchmarkSettingsChange}
+          benchmarkDataMap={benchmarkDataMap}
+          isBenchmarkLoading={isBenchmarkLoading}
+          benchmarkLoadingTickers={benchmarkLoadingTickers}
         />
         
         {/* P1.1 NEW: Add TagAnalytics component */}

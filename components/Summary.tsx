@@ -1,9 +1,11 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { PortfolioSummary, Asset, Currency, ClosedPosition } from '../types';
+import { PortfolioSummary, Asset, Currency, ClosedPosition, BenchmarkSettings, ChartBenchmarkData, BenchmarkData } from '../types';
 import { fetchExchangeRates, convertCurrencySync, fetchHistoricalExchangeRates, convertCurrencySyncHistorical } from '../services/currencyService';
 import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle, Scale } from 'lucide-react';
 import { getRebalancingAlertCount, DEFAULT_REBALANCING_SETTINGS } from '../services/rebalancingService';
 import { RebalancingModal } from './RebalancingModal';
+import { BenchmarkToggleBar } from './BenchmarkToggleBar';
+import { prepareBenchmarksForChart } from '../services/benchmarkService';
 
 // P1.1 CHANGE: Updated interface to receive displayCurrency and exchangeRates as props
 interface SummaryProps {
@@ -16,6 +18,12 @@ interface SummaryProps {
   setDisplayCurrency: (currency: Currency) => void;
   exchangeRates: Record<string, number>;
   portfolioId: string; // For rebalancing modal
+  // Benchmark comparison props
+  benchmarkSettings: BenchmarkSettings;
+  onBenchmarkSettingsChange: (settings: BenchmarkSettings) => void;
+  benchmarkDataMap: Map<string, BenchmarkData>;
+  isBenchmarkLoading: boolean;
+  benchmarkLoadingTickers: string[];
 }
 
 const CHART_COLORS = [
@@ -64,7 +72,12 @@ export const Summary: React.FC<SummaryProps> = ({
   displayCurrency,
   setDisplayCurrency,
   exchangeRates,
-  portfolioId
+  portfolioId,
+  benchmarkSettings,
+  onBenchmarkSettingsChange,
+  benchmarkDataMap,
+  isBenchmarkLoading,
+  benchmarkLoadingTickers,
 }) => {
   const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
   const [customStart, setCustomStart] = useState('');
@@ -617,9 +630,26 @@ export const Summary: React.FC<SummaryProps> = ({
        };
     });
 
-    return { Chart: FinalChart, xAxisLabels: xLabels, yAxisLabels: yLabels, chartData: generatedData, maxY: computedMaxY };
+    return { Chart: FinalChart, xAxisLabels: xLabels, yAxisLabels: yLabels, chartData: generatedData, maxY: computedMaxY, chartTimestamps: generatedData.map(d => d.timestamp) };
 
   }, [assets, timeRange, customStart, customEnd, displayCurrency, ratesLoaded, historicalRatesLoaded, exchangeRates, historicalRates]);
+
+  // Prepare benchmark data for chart display
+  const chartBenchmarks = useMemo((): ChartBenchmarkData[] => {
+    if (!benchmarkSettings || chartData.length === 0) return [];
+
+    const chartTimestamps = chartData.map(d => d.timestamp);
+    return prepareBenchmarksForChart(benchmarkDataMap, benchmarkSettings.benchmarks, chartTimestamps);
+  }, [benchmarkSettings, benchmarkDataMap, chartData]);
+
+  // Calculate portfolio return % for the current time period (for benchmark comparison)
+  const portfolioReturnPercent = useMemo(() => {
+    if (chartData.length < 2) return 0;
+    const startValue = chartData[0].costBasis;  // Use cost basis as starting point
+    const endValue = chartData[chartData.length - 1].marketValue;
+    if (startValue === 0) return 0;
+    return ((endValue - startValue) / startValue) * 100;
+  }, [chartData]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     if (!chartContainerRef.current || chartData.length === 0) return;
@@ -1017,18 +1047,256 @@ export const Summary: React.FC<SummaryProps> = ({
                 </div>
              </div>
              
-             {/* 📊 CHART LEGEND - ONLY CHANGE */}
-             <div className="flex items-center justify-center gap-6 mt-6 text-xs text-slate-400">
+             {/* 📊 CHART LEGEND */}
+             <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 mt-6 text-xs text-slate-400">
                <div className="flex items-center gap-2">
                  <div className="w-8 h-0.5 border-t-2 border-dashed border-white opacity-90"></div>
-                 <span>Cost Basis (Total Invested)</span>
+                 <span>Cost Basis</span>
                </div>
                <div className="flex items-center gap-2">
                  <div className="w-8 h-3 bg-gradient-to-r from-indigo-500 to-emerald-500 rounded-sm opacity-70"></div>
-                 <span>Market Value (Current Holdings)</span>
+                 <span>Market Value</span>
                </div>
              </div>
           </div>
+      </div>
+
+      {/* Performance Comparison Chart (% Returns) */}
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
+        {/* Title */}
+        <div className="text-sm font-medium text-slate-300 mb-4">Performance Comparison (%)</div>
+
+        {/* Benchmark Toggle Bar */}
+        {benchmarkSettings && (
+          <div className="mb-6">
+            <BenchmarkToggleBar
+              settings={benchmarkSettings}
+              onSettingsChange={onBenchmarkSettingsChange}
+              chartBenchmarks={chartBenchmarks}
+              portfolioReturn={portfolioReturnPercent}
+              isLoading={isBenchmarkLoading}
+              loadingTickers={benchmarkLoadingTickers}
+            />
+          </div>
+        )}
+
+        {/* Performance Comparison Chart */}
+        {(() => {
+          // Calculate normalized portfolio performance (% change from start)
+          const portfolioPerformanceData = chartData.map((d: ChartDataPoint) => {
+            const startCost = chartData[0].costBasis;
+            if (startCost === 0) return { timestamp: d.timestamp, percentChange: 0 };
+            const percentChange = ((d.marketValue - startCost) / startCost) * 100;
+            return { timestamp: d.timestamp, percentChange };
+          });
+
+          // Calculate Y-axis range (find min/max across portfolio and all benchmarks)
+          let minPercent = 0;
+          let maxPercent = 0;
+
+          portfolioPerformanceData.forEach(d => {
+            if (d.percentChange < minPercent) minPercent = d.percentChange;
+            if (d.percentChange > maxPercent) maxPercent = d.percentChange;
+          });
+
+          chartBenchmarks.forEach(benchmark => {
+            benchmark.data.forEach(d => {
+              if (d.percentChange < minPercent) minPercent = d.percentChange;
+              if (d.percentChange > maxPercent) maxPercent = d.percentChange;
+            });
+          });
+
+          // Add padding to Y range
+          const yPadding = Math.max(Math.abs(maxPercent - minPercent) * 0.1, 5);
+          minPercent = Math.floor(minPercent - yPadding);
+          maxPercent = Math.ceil(maxPercent + yPadding);
+          const yRange = maxPercent - minPercent;
+
+          // Helper functions for coordinate conversion
+          const getX = (idx: number, total: number) => (idx / (total - 1)) * 100;
+          const getY = (percent: number) => ((maxPercent - percent) / yRange) * 100;
+
+          // Generate portfolio path
+          const portfolioPath = portfolioPerformanceData.length > 1
+            ? `M ${portfolioPerformanceData.map((d, idx) =>
+                `${getX(idx, portfolioPerformanceData.length).toFixed(2)},${getY(d.percentChange).toFixed(2)}`
+              ).join(' L ')}`
+            : '';
+
+          // Generate Y-axis labels
+          const yLabelsPercent = [0, 0.25, 0.5, 0.75, 1].map(p => {
+            const val = maxPercent - (yRange * p);
+            return {
+              y: p * 100,
+              text: `${val >= 0 ? '+' : ''}${val.toFixed(0)}%`
+            };
+          });
+
+          // Find where 0% line should be
+          const zeroLineY = getY(0);
+
+          return (
+            <div className="relative">
+              <div className="absolute left-0 top-0 bottom-6 w-12 flex flex-col justify-between text-[9px] text-slate-500 pointer-events-none py-2 text-right pr-1 z-10">
+                {yLabelsPercent.map((lbl, i) => (
+                  <span key={i}>{lbl.text}</span>
+                ))}
+              </div>
+
+              <div className="h-64 bg-slate-900/30 rounded-lg relative ml-12 w-[calc(100%-48px)]">
+                {!ratesLoaded || !historicalRatesLoaded ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-slate-500 text-sm flex items-center gap-2">
+                      <RefreshCw className="animate-spin" size={16} />
+                      Loading data...
+                    </div>
+                  </div>
+                ) : (
+                  <div className="absolute inset-0 p-2 pointer-events-none">
+                    <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                      {/* Grid lines */}
+                      {[0, 0.25, 0.5, 0.75, 1].map(p => (
+                        <line key={p} x1="0" y1={p * 100} x2="100" y2={p * 100} stroke="#334155" strokeWidth="0.2" strokeDasharray="2 2" />
+                      ))}
+
+                      {/* Zero line (if visible) */}
+                      {zeroLineY >= 0 && zeroLineY <= 100 && (
+                        <line x1="0" y1={zeroLineY} x2="100" y2={zeroLineY} stroke="#64748b" strokeWidth="0.5" strokeOpacity="0.8" />
+                      )}
+
+                      {/* Benchmark lines */}
+                      {chartBenchmarks.map((benchmark) => {
+                        if (benchmark.data.length < 2) return null;
+                        const path = `M ${benchmark.data.map((d, idx) =>
+                          `${getX(idx, benchmark.data.length).toFixed(2)},${getY(d.percentChange).toFixed(2)}`
+                        ).join(' L ')}`;
+
+                        return (
+                          <path
+                            key={benchmark.ticker}
+                            d={path}
+                            fill="none"
+                            stroke={benchmark.color}
+                            strokeWidth="1.5"
+                            strokeOpacity={0.9}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        );
+                      })}
+
+                      {/* Portfolio line (on top) */}
+                      {portfolioPath && (
+                        <path
+                          d={portfolioPath}
+                          fill="none"
+                          stroke="#3b82f6"
+                          strokeWidth="2"
+                          strokeOpacity={1}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                    </svg>
+                  </div>
+                )}
+
+                {/* X-axis labels */}
+                <div className="absolute bottom-0 left-0 right-0 h-6 flex justify-between px-2 pointer-events-none">
+                  {xAxisLabels.map((lbl: { x: number; text: string }, i: number) => (
+                    <span
+                      key={i}
+                      className="text-[10px] text-slate-500 whitespace-nowrap"
+                      style={{ position: 'absolute', left: `${lbl.x}%`, transform: 'translateX(-50%)', bottom: '-20px' }}
+                    >
+                      {lbl.text}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Chart Legend */}
+              <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 mt-6 text-xs text-slate-400">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-0.5 bg-blue-500"></div>
+                  <span>Your Portfolio</span>
+                </div>
+                {chartBenchmarks.map((benchmark) => (
+                  <div key={benchmark.ticker} className="flex items-center gap-2">
+                    <div className="w-8 h-0.5" style={{ backgroundColor: benchmark.color }}></div>
+                    <span>{benchmark.name}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Performance Summary Table - only show when benchmarks are active */}
+              {chartBenchmarks.length > 0 && (
+                <div className="mt-6 bg-slate-900/50 rounded-lg border border-slate-700/50 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-700/50 bg-slate-800/50">
+                        <th className="text-left text-slate-400 font-medium px-4 py-3">Index</th>
+                        <th className="text-right text-slate-400 font-medium px-4 py-3">Return</th>
+                        <th className="text-right text-slate-400 font-medium px-4 py-3">vs Portfolio</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Portfolio row */}
+                      <tr className="border-b border-slate-700/30">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-3 h-3 rounded-full bg-blue-500" />
+                            <span className="text-white font-medium">Your Portfolio</span>
+                          </div>
+                        </td>
+                        <td className={`text-right px-4 py-3 font-semibold ${portfolioReturnPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {portfolioReturnPercent >= 0 ? '+' : ''}{portfolioReturnPercent.toFixed(2)}%
+                        </td>
+                        <td className="text-right px-4 py-3 text-slate-500">—</td>
+                      </tr>
+
+                      {/* Benchmark rows */}
+                      {chartBenchmarks.map((benchmark) => {
+                        const outperformance = portfolioReturnPercent - benchmark.returnPercent;
+                        const isOutperforming = outperformance >= 0;
+
+                        return (
+                          <tr key={benchmark.ticker} className="border-b border-slate-700/30 last:border-b-0">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className="w-3 h-3 rounded-full"
+                                  style={{ backgroundColor: benchmark.color }}
+                                />
+                                <span className="text-slate-300">{benchmark.name}</span>
+                              </div>
+                            </td>
+                            <td className={`text-right px-4 py-3 font-medium ${benchmark.returnPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {benchmark.returnPercent >= 0 ? '+' : ''}{benchmark.returnPercent.toFixed(2)}%
+                            </td>
+                            <td className="text-right px-4 py-3">
+                              <div className={`inline-flex items-center gap-1.5 ${isOutperforming ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {isOutperforming ? (
+                                  <TrendingUp className="w-4 h-4" />
+                                ) : (
+                                  <TrendingDown className="w-4 h-4" />
+                                )}
+                                <span className="font-medium">
+                                  {outperformance >= 0 ? '+' : ''}{outperformance.toFixed(2)}%
+                                </span>
+                                <span className="text-lg">
+                                  {isOutperforming ? '✓' : '✗'}
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
     </div>
