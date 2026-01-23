@@ -1,7 +1,8 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { PortfolioSummary, Asset, Currency, ClosedPosition, BenchmarkSettings, ChartBenchmarkData, BenchmarkData } from '../types';
 import { fetchExchangeRates, convertCurrencySync, fetchHistoricalExchangeRates, convertCurrencySyncHistorical } from '../services/currencyService';
-import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle, Scale, Plus } from 'lucide-react';
+import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle, Scale, Plus, Download } from 'lucide-react';
+import { exportHoldingsToCSV } from '../utils/csvExport';
 import { getRebalancingAlertCount, DEFAULT_REBALANCING_SETTINGS } from '../services/rebalancingService';
 import { RebalancingModal } from './RebalancingModal';
 import { BenchmarkToggleBar } from './BenchmarkToggleBar';
@@ -18,6 +19,7 @@ interface SummaryProps {
   setDisplayCurrency: (currency: Currency) => void;
   exchangeRates: Record<string, number>;
   portfolioId: string; // For rebalancing modal
+  portfolioName: string; // For holdings export filename
   // Benchmark comparison props
   benchmarkSettings: BenchmarkSettings;
   onBenchmarkSettingsChange: (settings: BenchmarkSettings) => void;
@@ -77,6 +79,7 @@ export const Summary: React.FC<SummaryProps> = ({
   setDisplayCurrency,
   exchangeRates,
   portfolioId,
+  portfolioName,
   benchmarkSettings,
   onBenchmarkSettingsChange,
   benchmarkDataMap,
@@ -99,6 +102,27 @@ export const Summary: React.FC<SummaryProps> = ({
   const [showRebalancingModal, setShowRebalancingModal] = useState(false);
   const [hoverData, setHoverData] = useState<{ x: number, y: number, data: ChartDataPoint } | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  const [exportMessage, setExportMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Handle holdings CSV export
+  const handleExportHoldings = () => {
+    const result = exportHoldingsToCSV(
+      assets,
+      portfolioName,
+      displayCurrency,
+      exchangeRates,
+      closedPositions
+    );
+
+    if (result.success) {
+      setExportMessage({ type: 'success', text: `Exported ${result.count} holdings` });
+    } else {
+      setExportMessage({ type: 'error', text: result.error || 'Export failed' });
+    }
+
+    // Clear message after 3 seconds
+    setTimeout(() => setExportMessage(null), 3000);
+  };
 
   // Hover state for Performance Comparison chart
   const [comparisonHoverData, setComparisonHoverData] = useState<{
@@ -895,8 +919,31 @@ export const Summary: React.FC<SummaryProps> = ({
                    </div>
                  )}
 
-                 {/* Rebalancing Button */}
-                 <div className="mt-4 pt-4 border-t border-slate-700/50">
+                 {/* Action Buttons */}
+                 <div className="mt-4 pt-4 border-t border-slate-700/50 space-y-2">
+                   {/* Export Holdings Button */}
+                   <button
+                     onClick={handleExportHoldings}
+                     disabled={assets.length === 0}
+                     className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-all text-sm font-medium text-slate-300 hover:text-slate-200"
+                     title="Export current holdings to CSV for analysis in Excel"
+                   >
+                     <Download size={16} />
+                     Export Holdings to CSV
+                   </button>
+
+                   {/* Export Success/Error Message */}
+                   {exportMessage && (
+                     <div className={`text-center text-xs py-1 px-2 rounded ${
+                       exportMessage.type === 'success'
+                         ? 'bg-emerald-500/20 text-emerald-300'
+                         : 'bg-red-500/20 text-red-300'
+                     }`}>
+                       {exportMessage.text}
+                     </div>
+                   )}
+
+                   {/* Rebalancing Button */}
                    <button
                      onClick={() => setShowRebalancingModal(true)}
                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 hover:border-indigo-500/50 rounded-lg transition-all text-sm font-medium text-indigo-300 hover:text-indigo-200"

@@ -5,11 +5,11 @@
  * across portfolios. Provides bulk actions and CSV export functionality.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Portfolio, Currency } from '../../types';
 import { useTransactionFilters } from '../../hooks/useTransactionFilters';
-import { exportTransactionsToCSV } from '../../utils/csvExport';
-import { getTransactionTypeInfo, FlattenedTransaction } from '../../utils/transactionHelpers';
+import { exportTransactionsToCSV, exportAllTransactionsToCSV } from '../../utils/csvExport';
+import { getTransactionTypeInfo, FlattenedTransaction, flattenTransactions } from '../../utils/transactionHelpers';
 import { getPageNumbers } from '../../hooks/usePagination';
 import {
   Search,
@@ -25,12 +25,16 @@ import {
   Link2Off,
   Filter,
   RotateCcw,
+  Layers,
+  FolderOpen,
 } from 'lucide-react';
 
 interface TransactionHistoryPageProps {
   portfolios: Portfolio[];
   displayCurrency: Currency;
   exchangeRates: Record<string, number>;
+  activePortfolioId: string;
+  activePortfolioName: string;
   onEditTransaction?: (assetId: string, txId: string) => void;
   onDeleteTransaction?: (assetId: string, txId: string) => void;
 }
@@ -57,9 +61,22 @@ export const TransactionHistoryPage: React.FC<TransactionHistoryPageProps> = ({
   portfolios,
   displayCurrency,
   exchangeRates,
+  activePortfolioId,
+  activePortfolioName,
   onEditTransaction,
   onDeleteTransaction,
 }) => {
+  // Portfolio scope toggle: true = all portfolios, false = current portfolio only
+  const [showAllPortfolios, setShowAllPortfolios] = useState(true);
+
+  // Filter portfolios based on toggle
+  const scopedPortfolios = useMemo(() => {
+    if (showAllPortfolios) {
+      return portfolios;
+    }
+    return portfolios.filter(p => p.id === activePortfolioId);
+  }, [portfolios, activePortfolioId, showAllPortfolios]);
+
   const {
     // Search
     searchInputValue,
@@ -101,7 +118,7 @@ export const TransactionHistoryPage: React.FC<TransactionHistoryPageProps> = ({
 
     // Pagination
     pagination,
-  } = useTransactionFilters(portfolios);
+  } = useTransactionFilters(scopedPortfolios);
 
   // Currency formatter
   const currencyFmt = useMemo(() => {
@@ -113,13 +130,23 @@ export const TransactionHistoryPage: React.FC<TransactionHistoryPageProps> = ({
     });
   }, [displayCurrency]);
 
-  // Handle CSV export
+  // Handle CSV export (filtered/selected transactions)
   const handleExport = () => {
     const toExport = selectedIds.size > 0
       ? filteredTransactions.filter(t => selectedIds.has(t.transaction.id))
       : filteredTransactions;
 
     exportTransactionsToCSV(toExport, 'transactions');
+  };
+
+  // Handle CSV export (ALL transactions in current scope, ignoring filters)
+  const handleExportAll = () => {
+    const allTransactions = flattenTransactions(scopedPortfolios);
+    const filename = showAllPortfolios ? 'All_Portfolios' : activePortfolioName;
+    const result = exportAllTransactionsToCSV(allTransactions, filename);
+    if (!result.success) {
+      console.warn(result.error);
+    }
   };
 
   // Sort indicator component
@@ -358,6 +385,20 @@ export const TransactionHistoryPage: React.FC<TransactionHistoryPageProps> = ({
             ))}
           </select>
 
+          {/* Portfolio Scope Toggle */}
+          <button
+            onClick={() => setShowAllPortfolios(!showAllPortfolios)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+              showAllPortfolios
+                ? 'bg-slate-800 border-slate-600 text-slate-400 hover:text-slate-300'
+                : 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+            }`}
+            title={showAllPortfolios ? 'Showing all portfolios' : `Showing only ${activePortfolioName}`}
+          >
+            {showAllPortfolios ? <Layers size={16} /> : <FolderOpen size={16} />}
+            {showAllPortfolios ? 'All Portfolios' : activePortfolioName}
+          </button>
+
           {/* Linked Transaction Toggle */}
           <button
             onClick={() => setShowCombinedView(!showCombinedView)}
@@ -385,16 +426,30 @@ export const TransactionHistoryPage: React.FC<TransactionHistoryPageProps> = ({
             </button>
           )}
 
-          {/* Export Button */}
-          <button
-            onClick={handleExport}
-            disabled={filteredCount === 0}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium transition-colors"
-          >
-            <Download size={16} />
-            Export CSV
-            {selectedIds.size > 0 && ` (${selectedIds.size})`}
-          </button>
+          {/* Export Buttons */}
+          <div className="flex items-center gap-2">
+            {/* Export Filtered - Primary style */}
+            <button
+              onClick={handleExport}
+              disabled={filteredCount === 0}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium transition-colors"
+              title="Export currently filtered/selected transactions"
+            >
+              <Download size={16} />
+              Export Filtered ({selectedIds.size > 0 ? selectedIds.size : filteredCount})
+            </button>
+
+            {/* Export All - Secondary/outline style */}
+            <button
+              onClick={handleExportAll}
+              disabled={totalCount === 0}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-500/50 hover:border-emerald-500 bg-transparent hover:bg-emerald-500/10 disabled:border-slate-600 disabled:text-slate-500 text-emerald-400 hover:text-emerald-300 text-sm font-medium transition-colors"
+              title="Export all transactions (ignores filters)"
+            >
+              <Download size={16} />
+              Export All ({totalCount})
+            </button>
+          </div>
         </div>
       </div>
 

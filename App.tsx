@@ -3091,6 +3091,8 @@ const App: React.FC = () => {
           portfolios={portfolios}
           displayCurrency={displayCurrency}
           exchangeRates={exchangeRates}
+          activePortfolioId={activePortfolio?.id || ''}
+          activePortfolioName={activePortfolio?.name || 'Portfolio'}
         />
       ) : (
         <main className="max-w-screen-2xl mx-auto px-8 py-8">
@@ -3106,6 +3108,7 @@ const App: React.FC = () => {
             setDisplayCurrency={setDisplayCurrency}
             exchangeRates={exchangeRates}
             portfolioId={activePortfolio?.id || ''}
+            portfolioName={activePortfolio?.name || 'Portfolio'}
             benchmarkSettings={benchmarkSettings}
             onBenchmarkSettingsChange={handleBenchmarkSettingsChange}
             benchmarkDataMap={benchmarkDataMap}
