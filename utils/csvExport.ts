@@ -6,7 +6,7 @@
  */
 
 import { FlattenedTransaction } from './transactionHelpers';
-import { Asset, Currency, ClosedPosition } from '../types';
+import { Asset, Currency, ClosedPosition, AssetNote } from '../types';
 import { convertCurrencySync } from '../services/currencyService';
 
 /**
@@ -41,6 +41,7 @@ export interface HoldingExportData {
   totalInvested: number;
   exportDate: string;
   displayCurrency: string;
+  note: string; // User note for this holding
 }
 
 /**
@@ -278,7 +279,8 @@ export function calculateHoldingData(
   displayCurrency: Currency,
   exchangeRates: Record<string, number>,
   totalPortfolioValue: number,
-  closedPositions: ClosedPosition[]
+  closedPositions: ClosedPosition[],
+  note?: string
 ): HoldingExportData {
   const nativeCurrency = asset.currency || detectCurrencyFromTicker(asset.ticker);
   const exportDate = new Date().toISOString().split('T')[0];
@@ -407,6 +409,7 @@ export function calculateHoldingData(
     totalInvested,
     exportDate,
     displayCurrency,
+    note: note || '',
   };
 }
 
@@ -443,6 +446,7 @@ export function generateHoldingsCSV(holdings: HoldingExportData[]): string {
     `Total Invested`,
     'Export Date',
     'Display Currency',
+    'Notes', // User notes for this holding
   ];
 
   const rows: string[] = [headers.map(escapeCSVValue).join(',')];
@@ -476,6 +480,7 @@ export function generateHoldingsCSV(holdings: HoldingExportData[]): string {
       holding.totalInvested.toFixed(2),
       holding.exportDate,
       holding.displayCurrency,
+      holding.note, // User note
     ];
 
     rows.push(row.map(escapeCSVValue).join(','));
@@ -514,7 +519,8 @@ export function exportHoldingsToCSV(
   portfolioName: string,
   displayCurrency: Currency,
   exchangeRates: Record<string, number>,
-  closedPositions: ClosedPosition[]
+  closedPositions: ClosedPosition[],
+  assetNotes?: AssetNote[]
 ): { success: boolean; count: number; error?: string } {
   if (assets.length === 0) {
     return { success: false, count: 0, error: 'No holdings to export' };
@@ -538,14 +544,21 @@ export function exportHoldingsToCSV(
     // Calculate holding data for each asset
     const holdingsData: HoldingExportData[] = assets
       .filter(asset => asset.quantity > 0) // Only export assets with holdings
-      .map(asset => calculateHoldingData(
-        asset,
-        portfolioName,
-        displayCurrency,
-        exchangeRates,
-        totalPortfolioValue,
-        closedPositions
-      ));
+      .map(asset => {
+        // Find note for this asset
+        const assetNote = assetNotes?.find(
+          n => n.assetSymbol.toUpperCase() === asset.ticker.toUpperCase()
+        );
+        return calculateHoldingData(
+          asset,
+          portfolioName,
+          displayCurrency,
+          exchangeRates,
+          totalPortfolioValue,
+          closedPositions,
+          assetNote?.note
+        );
+      });
 
     if (holdingsData.length === 0) {
       return { success: false, count: 0, error: 'No holdings with positive quantity to export' };

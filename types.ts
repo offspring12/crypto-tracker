@@ -141,6 +141,22 @@ export interface ClosedPosition {
   holdingPeriodDays: number;
 }
 
+// ============================================================================
+// ASSET NOTES - Per-holding notes (portfolio-specific)
+// ============================================================================
+
+/**
+ * Note attached to a specific holding within a portfolio.
+ * Notes are portfolio-specific: same asset can have different notes in different portfolios.
+ */
+export interface AssetNote {
+  portfolioId: string;      // Portfolio this note belongs to
+  assetSymbol: string;      // Asset ticker (e.g., 'BTC', 'AAPL')
+  note: string;             // Free-form text content
+  createdAt: string;        // ISO timestamp when note was created
+  lastEditedAt: string;     // ISO timestamp when note was last modified
+}
+
 export interface Portfolio {
   id: string;
   name: string;
@@ -152,6 +168,7 @@ export interface Portfolio {
     displayCurrency?: Currency; // Optional: portfolio-level display currency
   };
   benchmarkSettings?: BenchmarkSettings; // Benchmark comparison settings (per-portfolio)
+  assetNotes?: AssetNote[];  // Notes for holdings in this portfolio
   createdAt: string;
 }
 

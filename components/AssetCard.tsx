@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Asset, TransactionTag, Currency, TransactionType } from '../types';
+import { Asset, TransactionTag, Currency, TransactionType, AssetNote } from '../types';
 import { convertCurrencySync } from '../services/currencyService';
-import { Trash2, RefreshCw, ChevronDown, ChevronUp, AlertCircle, History, TrendingUp, TrendingDown, Signal, SignalLow, Target, AlertTriangle, Edit2, Save, X, Download, ShoppingCart, ArrowRightLeft, Upload, Coins } from 'lucide-react';
+import { Trash2, RefreshCw, ChevronDown, ChevronUp, AlertCircle, History, TrendingUp, TrendingDown, Signal, SignalLow, Target, AlertTriangle, Edit2, Save, X, Download, ShoppingCart, ArrowRightLeft, Upload, Coins, FileText, Plus } from 'lucide-react';
 
 interface AssetCardProps {
   asset: Asset;
@@ -15,6 +15,9 @@ interface AssetCardProps {
   onSell: (asset: Asset) => void; // P2: Trading Lifecycle - Open sell modal
   onQuickTransaction: (asset: Asset, transactionType: TransactionType) => void; // Quick transaction from card
   closedPositions?: any[]; // P2: For calculating SELL transaction P&L
+  // Asset Notes
+  note?: AssetNote; // Existing note for this asset (if any)
+  onNoteClick: (asset: Asset) => void; // Callback when note icon/button is clicked
 }
 
 const TAG_COLORS: Record<TransactionTag, string> = {
@@ -144,7 +147,7 @@ const calculateFxAdjustedPnL = (
   };
 };
 
-export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue, onRemove, onRemoveTransaction, onRefresh, onUpdate, onEditTransaction, onSell, onQuickTransaction, closedPositions }) => {
+export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue, onRemove, onRemoveTransaction, onRefresh, onUpdate, onEditTransaction, onSell, onQuickTransaction, closedPositions, note, onNoteClick }) => {
   const [showDetails, setShowDetails] = useState(false);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ quantity: string; pricePerCoin: string; date: string; tag: TransactionTag; customTag: string }>({
@@ -285,6 +288,26 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
                 </span>
               )}
             </div>
+            {/* Asset Note Button/Icon */}
+            <button
+              onClick={() => onNoteClick(asset)}
+              className={`group/note flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-medium transition-colors flex-shrink-0 ${
+                note
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30'
+                  : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-600/50 hover:text-slate-300'
+              }`}
+              title={note ? note.note.substring(0, 50) + (note.note.length > 50 ? '...' : '') : 'Add note to this holding'}
+            >
+              <FileText size={12} />
+              {note ? (
+                <span className="hidden sm:inline">Note</span>
+              ) : (
+                <>
+                  <Plus size={10} className="opacity-60" />
+                  <span className="hidden sm:inline">Add Note</span>
+                </>
+              )}
+            </button>
           </div>
           {asset.name && isContractAddress && (
             <p className="text-slate-500 text-xs font-mono mb-1">{asset.ticker.slice(0, 10)}...{asset.ticker.slice(-8)}</p>

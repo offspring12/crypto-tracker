@@ -25,6 +25,8 @@ import { usePortfolios } from './hooks/usePortfolios'; // Portfolio state manage
 import { useAssetHandlers } from './hooks/useAssetHandlers'; // Asset CRUD operations
 import { useTransactionHandlers } from './hooks/useTransactionHandlers'; // Transaction handlers
 import { useTransactionModifiers } from './hooks/useTransactionModifiers'; // Transaction removal/editing
+import { useAssetNotes } from './hooks/useAssetNotes'; // Asset notes management
+import { NoteModal } from './components/NoteModal'; // Asset notes modal
 
 const App: React.FC = () => {
   // Portfolio state management (extracted to usePortfolios hook)
@@ -53,6 +55,9 @@ const App: React.FC = () => {
   const [quickTransactionAsset, setQuickTransactionAsset] = useState<string | undefined>(undefined);
   const [quickTransactionType, setQuickTransactionType] = useState<'DEPOSIT' | 'BUY' | 'SELL' | 'WITHDRAW' | 'TRANSFER' | 'INCOME' | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Asset notes modal state
+  const [noteModalAsset, setNoteModalAsset] = useState<Asset | null>(null);
 
   // Currency state management (extracted to useCurrency hook)
   const { displayCurrency, setDisplayCurrency, exchangeRates } = useCurrency('USD');
@@ -127,6 +132,17 @@ const App: React.FC = () => {
     setPortfolios,
     displayCurrency,
     handleRemoveAsset,
+  });
+
+  // Asset notes management (extracted to useAssetNotes hook)
+  const {
+    getNote,
+    saveNote,
+    deleteNote,
+    hasNote,
+  } = useAssetNotes({
+    activePortfolio,
+    updateActivePortfolio,
   });
 
   // Calculate summary - values are aggregated by Summary.tsx with currency conversion
@@ -524,6 +540,7 @@ const App: React.FC = () => {
             onBenchmarkRefresh={handleBenchmarkRefresh}
             onTimeRangeChange={handleTimeRangeChange}
             onNewTransaction={() => setIsTransactionModalOpen(true)}
+            assetNotes={activePortfolio?.assetNotes}
           />
 
           {/* P1.1 NEW: Add TagAnalytics component */}
@@ -556,6 +573,8 @@ const App: React.FC = () => {
                 onSell={(asset) => setSellModalAsset(asset)}
                 onQuickTransaction={handleQuickTransaction}
                 closedPositions={activePortfolio?.closedPositions || []}
+                note={getNote(asset.ticker)}
+                onNoteClick={(asset) => setNoteModalAsset(asset)}
               />
             ))}
           </div>
@@ -646,6 +665,25 @@ const App: React.FC = () => {
           initialAssetTicker={quickTransactionAsset}
         />
       )}
+
+      {/* Asset Notes Modal */}
+      <NoteModal
+        isOpen={noteModalAsset !== null}
+        assetSymbol={noteModalAsset?.ticker || ''}
+        assetName={noteModalAsset?.name || noteModalAsset?.ticker || ''}
+        portfolioName={activePortfolio?.name || 'Portfolio'}
+        existingNote={noteModalAsset ? getNote(noteModalAsset.ticker) : undefined}
+        onSave={(noteText) => {
+          if (!noteModalAsset) return { success: false, error: 'No asset selected' };
+          return saveNote(noteModalAsset.ticker, noteText);
+        }}
+        onDelete={() => {
+          if (noteModalAsset) {
+            deleteNote(noteModalAsset.ticker);
+          }
+        }}
+        onClose={() => setNoteModalAsset(null)}
+      />
 
     </div>
   );

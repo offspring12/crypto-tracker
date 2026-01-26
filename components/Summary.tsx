@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { PortfolioSummary, Asset, Currency, ClosedPosition, BenchmarkSettings, ChartBenchmarkData, BenchmarkData } from '../types';
+import { PortfolioSummary, Asset, Currency, ClosedPosition, BenchmarkSettings, ChartBenchmarkData, BenchmarkData, AssetNote } from '../types';
 import { fetchExchangeRates, convertCurrencySync, fetchHistoricalExchangeRates, convertCurrencySyncHistorical } from '../services/currencyService';
 import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle, Scale, Plus, Download } from 'lucide-react';
 import { isCashAsset } from '../services/portfolioService';
@@ -31,6 +31,8 @@ interface SummaryProps {
   onTimeRangeChange: (timeRange: BenchmarkTimeRange) => void;  // Notify parent of time range changes for benchmark fetching
   // New Transaction callback
   onNewTransaction: () => void;
+  // Asset notes for CSV export
+  assetNotes?: AssetNote[];
 }
 
 const CHART_COLORS = [
@@ -92,6 +94,7 @@ export const Summary: React.FC<SummaryProps> = ({
   onBenchmarkRefresh,
   onTimeRangeChange,
   onNewTransaction,
+  assetNotes,
 }) => {
   const [timeRange, setTimeRangeLocal] = useState<TimeRange>('ALL');
 
@@ -115,7 +118,8 @@ export const Summary: React.FC<SummaryProps> = ({
       portfolioName,
       displayCurrency,
       exchangeRates,
-      closedPositions
+      closedPositions,
+      assetNotes
     );
 
     if (result.success) {
