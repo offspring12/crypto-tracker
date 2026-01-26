@@ -38,3 +38,106 @@
 .tooltip-container {
   pointer-events: none;
 }
+
+/* ========================================
+   MOBILE RESPONSIVENESS UTILITIES
+   ======================================== */
+
+/* Mobile menu slide-in animation */
+@keyframes slideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+.mobile-menu-enter {
+  animation: slideIn 0.3s ease-out forwards;
+}
+
+.mobile-menu-exit {
+  animation: slideOut 0.3s ease-in forwards;
+}
+
+/* Mobile overlay fade */
+@keyframes fadeInOverlay {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.mobile-overlay {
+  animation: fadeInOverlay 0.2s ease-out forwards;
+}
+
+/* Touch-friendly minimum sizes */
+.touch-target {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Hide scrollbar on mobile for horizontal scroll containers */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Mobile card shadows */
+.mobile-card-shadow {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Responsive text truncation */
+.truncate-mobile {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Safe area padding for notched devices */
+@supports (padding: max(0px)) {
+  .safe-area-inset {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+
+  .safe-area-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+}
+
+/* Mobile-specific media queries */
+@media (max-width: 767px) {
+  /* Prevent horizontal overflow */
+  body {
+    overflow-x: hidden;
+  }
+
+  /* Larger touch targets for buttons */
+  button,
+  [role="button"],
+  a {
+    min-height: 44px;
+  }
+
+  /* Better input sizing on mobile */
+  input,
+  select,
+  textarea {
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+}

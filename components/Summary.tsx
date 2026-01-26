@@ -793,7 +793,7 @@ export const Summary: React.FC<SummaryProps> = ({
       
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         
-        <div className="col-span-1 md:col-span-4 bg-gradient-to-br from-indigo-600 to-indigo-900 rounded-xl p-6 shadow-lg text-white flex flex-col justify-between min-h-[180px]">
+        <div className="col-span-1 md:col-span-4 bg-gradient-to-br from-indigo-600 to-indigo-900 rounded-xl p-4 md:p-6 shadow-lg text-white flex flex-col justify-between min-h-[160px] md:min-h-[180px]">
             <div>
               <div className="flex items-center justify-between mb-4">
                 {/* P4 CHANGE: Add currency selector dropdown */}
@@ -819,7 +819,7 @@ export const Summary: React.FC<SummaryProps> = ({
                     <RefreshCw size={16} className={isGlobalLoading ? "animate-spin" : ""} />
                 </button>
               </div>
-              <div className="text-3xl font-bold tracking-tight mb-1">{formattedTotal}</div>
+              <div className="text-2xl md:text-3xl font-bold tracking-tight mb-1">{formattedTotal}</div>
 
               {/* P2: Split P&L display - Total, Unrealized, Realized */}
               <div className="space-y-1">
@@ -844,14 +844,15 @@ export const Summary: React.FC<SummaryProps> = ({
             </div>
         </div>
 
-        <div className="col-span-1 md:col-span-8 bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg flex flex-col md:flex-row items-center gap-6 min-h-[180px]">
-            <div className="relative w-32 h-32 flex-shrink-0">
-                <div 
+        <div className="col-span-1 md:col-span-8 bg-slate-800 border border-slate-700 rounded-xl p-4 md:p-6 shadow-lg flex flex-col md:flex-row items-center gap-4 md:gap-6 min-h-[160px] md:min-h-[180px]">
+            <div className="relative w-24 h-24 md:w-32 md:h-32 flex-shrink-0">
+                <div
                     className="w-full h-full rounded-full shadow-lg"
                     style={{ background: pieChartData.gradient }}
                 ></div>
-                <div className="absolute inset-0 m-auto w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700">
-                    <PieChart size={24} className="text-slate-500" />
+                <div className="absolute inset-0 m-auto w-14 h-14 md:w-20 md:h-20 bg-slate-800 rounded-full flex items-center justify-center border border-slate-700">
+                    <PieChart size={20} className="text-slate-500 md:hidden" />
+                    <PieChart size={24} className="text-slate-500 hidden md:block" />
                 </div>
             </div>
 
@@ -1001,35 +1002,35 @@ export const Summary: React.FC<SummaryProps> = ({
       <div className="mb-4">
         <button
           onClick={onNewTransaction}
-          className="w-full flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-lg font-semibold rounded-xl transition-all shadow-xl hover:shadow-2xl hover:scale-[1.02] active:scale-[0.98]"
+          className="w-full flex items-center justify-center gap-2 md:gap-3 px-4 md:px-8 py-3 md:py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-base md:text-lg font-semibold rounded-xl transition-all shadow-xl hover:shadow-2xl hover:scale-[1.02] active:scale-[0.98] touch-target"
         >
-          <Plus size={24} strokeWidth={2.5} />
+          <Plus size={22} strokeWidth={2.5} />
           New Transaction
         </button>
-        <p className="text-center text-slate-400 text-sm mt-2">
+        <p className="text-center text-slate-400 text-xs md:text-sm mt-2">
           Deposit, Buy, Sell, Withdraw, Transfer, or Record Income
         </p>
       </div>
 
-      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
-          <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 md:p-6 shadow-lg">
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-3">
               {/* P4 CHANGE: Show selected currency in title */}
               <div className="text-sm font-medium text-slate-300">Portfolio History ({displayCurrency})</div>
-              
-              <div className="flex items-center gap-2 flex-wrap justify-end">
+
+              <div className="flex items-center gap-2 flex-wrap">
                 {timeRange === 'CUSTOM' && (
-                  <div className="flex items-center gap-2 mr-2">
-                     <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white" />
+                  <div className="flex items-center gap-2 w-full md:w-auto mb-2 md:mb-0 md:mr-2">
+                     <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="flex-1 md:flex-none bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-xs text-white" />
                      <span className="text-slate-500">-</span>
-                     <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white" />
+                     <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="flex-1 md:flex-none bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-xs text-white" />
                   </div>
                 )}
-                <div className="flex items-center bg-slate-900 rounded-lg p-1">
+                <div className="flex items-center bg-slate-900 rounded-lg p-1 overflow-x-auto hide-scrollbar w-full md:w-auto">
                   {(['24H', '1W', '1M', 'ALL', 'CUSTOM'] as TimeRange[]).map(range => (
                       <button
                           key={range}
                           onClick={() => setTimeRange(range)}
-                          className={`text-[10px] font-bold px-3 py-1 rounded transition-colors ${timeRange === range ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
+                          className={`text-[10px] font-bold px-2.5 md:px-3 py-1.5 rounded transition-colors whitespace-nowrap touch-target ${timeRange === range ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
                       >
                           {range}
                       </button>
@@ -1039,18 +1040,20 @@ export const Summary: React.FC<SummaryProps> = ({
           </div>
           
           <div className="relative">
-             <div className="absolute left-0 top-0 bottom-6 w-10 flex flex-col justify-between text-[9px] text-slate-500 pointer-events-none py-2 text-right pr-1 z-10">
+             <div className="absolute left-0 top-0 bottom-6 w-8 md:w-10 flex flex-col justify-between text-[8px] md:text-[9px] text-slate-500 pointer-events-none py-2 text-right pr-1 z-10">
                 {yAxisLabels.map((lbl, i) => (
                    <span key={i}>{lbl.text}</span>
                 ))}
              </div>
 
-             <div 
+             <div
                 ref={chartContainerRef}
-                className="h-64 bg-slate-900/30 rounded-lg relative ml-10 w-[calc(100%-40px)] cursor-crosshair touch-none"
+                className="h-48 md:h-64 bg-slate-900/30 rounded-lg relative ml-8 md:ml-10 w-[calc(100%-32px)] md:w-[calc(100%-40px)] cursor-crosshair touch-none"
                 onMouseMove={handleMouseMove}
                 onMouseLeave={handleMouseLeave}
+                onTouchStart={handleMouseMove}
                 onTouchMove={handleMouseMove}
+                onTouchEnd={handleMouseLeave}
              >
                 {!ratesLoaded || !historicalRatesLoaded ? (
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -1068,13 +1071,13 @@ export const Summary: React.FC<SummaryProps> = ({
                 {hoverData && ratesLoaded && historicalRatesLoaded && (
                    <>
                       <div className="absolute top-0 bottom-0 w-px bg-white/40 pointer-events-none z-20" style={{ left: hoverData.x }} />
-                      <div 
-                        className="absolute bg-slate-800/95 border border-slate-600 rounded p-4 shadow-2xl z-30 min-w-[280px] backdrop-blur tooltip-container"
-                        style={{ 
-                          left: hoverData.x > ((chartContainerRef.current?.offsetWidth || 300) / 2) 
-                            ? Math.max(0, hoverData.x - 280 - 20)
-                            : Math.min(hoverData.x + 20, (chartContainerRef.current?.offsetWidth || 300) - 280),
-                          top: 20,
+                      <div
+                        className="absolute bg-slate-800/95 border border-slate-600 rounded p-3 md:p-4 shadow-2xl z-30 min-w-[220px] md:min-w-[280px] max-w-[calc(100vw-32px)] backdrop-blur tooltip-container"
+                        style={{
+                          left: hoverData.x > ((chartContainerRef.current?.offsetWidth || 300) / 2)
+                            ? Math.max(0, hoverData.x - 240 - 10)
+                            : Math.min(hoverData.x + 10, (chartContainerRef.current?.offsetWidth || 300) - 240),
+                          top: 10,
                           pointerEvents: 'none'
                         }}
                       >
@@ -1171,7 +1174,7 @@ export const Summary: React.FC<SummaryProps> = ({
              </div>
              
              {/* 📊 CHART LEGEND */}
-             <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 mt-6 text-xs text-slate-400">
+             <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 mt-8 text-xs text-slate-400">
                <div className="flex items-center gap-2">
                  <div className="w-8 h-0.5 border-t-2 border-dashed border-white opacity-90"></div>
                  <span>Cost Basis</span>
@@ -1185,7 +1188,7 @@ export const Summary: React.FC<SummaryProps> = ({
       </div>
 
       {/* Performance Comparison Chart (% Returns) */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-lg">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 md:p-6 shadow-lg">
         {/* Title */}
         <div className="text-sm font-medium text-slate-300 mb-4">Performance Comparison (%)</div>
 
@@ -1271,8 +1274,8 @@ export const Summary: React.FC<SummaryProps> = ({
           return (
             <div className="space-y-6">
               {/* Chart container with Y-axis */}
-              <div className="relative h-72 mb-8">
-                <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[9px] text-slate-500 pointer-events-none py-2 text-right pr-2">
+              <div className="relative mb-12">
+                <div className="absolute left-0 top-0 bottom-8 w-10 md:w-12 flex flex-col justify-between text-[8px] md:text-[9px] text-slate-500 pointer-events-none py-2 text-right pr-1 md:pr-2">
                   {yLabelsPercent.map((lbl, i) => (
                     <span key={i}>{lbl.text}</span>
                   ))}
@@ -1280,7 +1283,7 @@ export const Summary: React.FC<SummaryProps> = ({
 
                 <div
                   ref={comparisonChartRef}
-                  className="h-64 bg-slate-900/30 rounded-lg relative ml-14 w-[calc(100%-56px)]"
+                  className="h-48 md:h-64 bg-slate-900/30 rounded-lg relative ml-14 w-[calc(100%-56px)]"
                   onMouseMove={(e) => {
                     if (!comparisonChartRef.current || portfolioPerformanceData.length === 0) return;
                     const rect = comparisonChartRef.current.getBoundingClientRect();
@@ -1482,7 +1485,7 @@ export const Summary: React.FC<SummaryProps> = ({
               </div>
 
               {/* Chart Legend */}
-              <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 mt-6 text-xs text-slate-400">
+              <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 mt-10 text-xs text-slate-400">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-0.5 bg-blue-500"></div>
                   <span>Your Portfolio</span>

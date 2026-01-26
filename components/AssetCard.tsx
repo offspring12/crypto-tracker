@@ -266,12 +266,12 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
   };
 
   return (
-    <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg relative overflow-hidden transition-all hover:border-slate-600">
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 md:p-5 shadow-lg relative overflow-hidden transition-all hover:border-slate-600">
       
-      <div className="flex justify-between items-start mb-2">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-xl font-bold text-slate-100 uppercase flex items-center gap-2">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <h3 className="text-lg md:text-xl font-bold text-slate-100 uppercase flex items-center gap-1.5 md:gap-2">
               {asset.name || asset.ticker}
               {asset.error && <AlertCircle size={16} className="text-red-500" />}
               {hasHistory ? <Signal size={16} className="text-emerald-500/80" /> : <SignalLow size={16} className="text-slate-600" />}
@@ -280,7 +280,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
             {/* Asset Type Badge - Inline next to title */}
             <div className={`px-2 py-0.5 rounded-md border text-[9px] font-bold flex items-center gap-1 flex-shrink-0 ${assetTypeConfig.color}`}>
               <span>{assetTypeConfig.emoji}</span>
-              <span>{assetTypeConfig.label}</span>
+              <span className="hidden sm:inline">{assetTypeConfig.label}</span>
               {/* Currency Badge - Only show for non-USD */}
               {asset.currency && asset.currency !== 'USD' && (
                 <span className="ml-1 px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
@@ -288,37 +288,39 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
                 </span>
               )}
             </div>
-            {/* Asset Note Button/Icon */}
-            <button
-              onClick={() => onNoteClick(asset)}
-              className={`group/note flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-medium transition-colors flex-shrink-0 ${
-                note
-                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30'
-                  : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-600/50 hover:text-slate-300'
-              }`}
-              title={note ? note.note.substring(0, 50) + (note.note.length > 50 ? '...' : '') : 'Add note to this holding'}
-            >
-              <FileText size={12} />
-              {note ? (
-                <span className="hidden sm:inline">Note</span>
-              ) : (
-                <>
-                  <Plus size={10} className="opacity-60" />
-                  <span className="hidden sm:inline">Add Note</span>
-                </>
-              )}
-            </button>
           </div>
           {asset.name && isContractAddress && (
             <p className="text-slate-500 text-xs font-mono mb-1">{asset.ticker.slice(0, 10)}...{asset.ticker.slice(-8)}</p>
           )}
           <p className="text-slate-400 text-sm font-mono">{asset.quantity.toLocaleString()} units</p>
         </div>
-        <div className="text-right ml-4 flex-shrink-0">
-          <p className="text-2xl font-semibold text-slate-100 whitespace-nowrap">{currencyFmt.format(currentTotalValue)}</p>
-          <div className={`flex items-center justify-end gap-1 text-sm font-medium ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {isProfit ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-            <span className="whitespace-nowrap">{currencyFmt.format(profitLoss)} ({pctFmt.format(profitLossPercent / 100)})</span>
+        <div className="flex items-center justify-between sm:justify-end sm:text-right gap-3 sm:ml-4 flex-shrink-0">
+          {/* Asset Note Button/Icon - Moved here for mobile */}
+          <button
+            onClick={() => onNoteClick(asset)}
+            className={`flex items-center gap-1 px-2 py-1 sm:py-0.5 rounded-md border text-[10px] font-medium transition-colors flex-shrink-0 ${
+              note
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30'
+                : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-600/50 hover:text-slate-300'
+            }`}
+            title={note ? note.note.substring(0, 50) + (note.note.length > 50 ? '...' : '') : 'Add note to this holding'}
+          >
+            <FileText size={12} />
+            {note ? (
+              <span className="hidden sm:inline">Note</span>
+            ) : (
+              <>
+                <Plus size={10} className="opacity-60" />
+                <span className="hidden sm:inline">Add</span>
+              </>
+            )}
+          </button>
+          <div>
+            <p className="text-xl md:text-2xl font-semibold text-slate-100 whitespace-nowrap">{currencyFmt.format(currentTotalValue)}</p>
+            <div className={`flex items-center justify-end gap-1 text-sm font-medium ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {isProfit ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+              <span className="whitespace-nowrap">{currencyFmt.format(profitLoss)} ({pctFmt.format(profitLossPercent / 100)})</span>
+            </div>
           </div>
         </div>
       </div>
@@ -334,66 +336,67 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, totalPortfolioValue
         </div>
       </div>
 
-      <div className="flex items-center justify-between pt-4 border-t border-slate-700">
-        <button onClick={() => setShowDetails(!showDetails)} className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 transition-colors">
-          {showDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {showDetails ? 'Hide' : 'Transactions'}
-        </button>
-        <div className="flex gap-1.5">
-          {/* Transaction action buttons */}
+      <div className="flex flex-col gap-3 pt-4 border-t border-slate-700">
+        {/* Transaction action buttons - wrap on mobile */}
+        <div className="flex flex-wrap gap-1.5 justify-end">
           <button
             onClick={() => onQuickTransaction(asset, 'DEPOSIT')}
-            className="p-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 transition-colors"
+            className="p-2 md:p-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 transition-colors touch-target"
             title="Deposit"
           >
-            <Download size={14} />
+            <Download size={16} className="md:w-3.5 md:h-3.5" />
           </button>
           <button
             onClick={() => onQuickTransaction(asset, 'BUY')}
-            className="p-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 transition-colors"
+            className="p-2 md:p-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 transition-colors touch-target"
             title="Buy"
           >
-            <ShoppingCart size={14} />
+            <ShoppingCart size={16} className="md:w-3.5 md:h-3.5" />
           </button>
           <button
             onClick={() => onSell(asset)}
-            className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 transition-colors"
+            className="p-2 md:p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 transition-colors touch-target"
             title="Sell"
           >
-            <TrendingDown size={14} />
+            <TrendingDown size={16} className="md:w-3.5 md:h-3.5" />
           </button>
           <button
             onClick={() => onQuickTransaction(asset, 'TRANSFER')}
-            className="p-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 transition-colors"
+            className="p-2 md:p-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/40 text-purple-400 transition-colors touch-target"
             title="Transfer"
           >
-            <ArrowRightLeft size={14} />
+            <ArrowRightLeft size={16} className="md:w-3.5 md:h-3.5" />
           </button>
           <button
             onClick={() => onQuickTransaction(asset, 'WITHDRAWAL')}
-            className="p-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 transition-colors"
+            className="p-2 md:p-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 transition-colors touch-target"
             title="Withdraw"
           >
-            <Upload size={14} />
+            <Upload size={16} className="md:w-3.5 md:h-3.5" />
           </button>
           <button
             onClick={() => onQuickTransaction(asset, 'INCOME')}
-            className="p-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/40 text-cyan-400 transition-colors"
+            className="p-2 md:p-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/40 text-cyan-400 transition-colors touch-target"
             title="Income"
           >
-            <Coins size={14} />
+            <Coins size={16} className="md:w-3.5 md:h-3.5" />
           </button>
+        </div>
 
-          {/* Divider */}
-          <div className="w-px bg-slate-600 mx-1"></div>
-
-          {/* Utility buttons */}
-          <button onClick={() => onRefresh(asset.id)} disabled={asset.isUpdating} className={`p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-all ${asset.isUpdating ? 'animate-spin' : ''}`} title="Refresh Price">
-            <RefreshCw size={14} />
+        {/* Bottom row: Transactions toggle + Utility buttons */}
+        <div className="flex items-center justify-between">
+          <button onClick={() => setShowDetails(!showDetails)} className="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 transition-colors">
+            {showDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            {showDetails ? 'Hide' : 'Transactions'}
           </button>
-          <button onClick={() => onRemove(asset.id)} className="p-1.5 rounded-lg bg-slate-700 hover:bg-red-900/50 hover:text-red-400 text-slate-300 transition-colors" title="Delete Asset">
-            <Trash2 size={14} />
-          </button>
+          <div className="flex gap-1.5">
+            <button onClick={() => onRefresh(asset.id)} disabled={asset.isUpdating} className={`p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-all ${asset.isUpdating ? 'animate-spin' : ''}`} title="Refresh Price">
+              <RefreshCw size={14} />
+            </button>
+            <button onClick={() => onRemove(asset.id)} className="p-1.5 rounded-lg bg-slate-700 hover:bg-red-900/50 hover:text-red-400 text-slate-300 transition-colors" title="Delete Asset">
+              <Trash2 size={14} />
+            </button>
+          </div>
         </div>
       </div>
 

@@ -186,18 +186,18 @@ export const TransferForm: React.FC<TransferFormProps> = ({
       />
 
       {/* Submit Button */}
-      <div className="flex gap-3 pt-4">
+      <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4">
         <button
           type="button"
           onClick={onClose}
-          className="flex-1 px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition-colors"
+          className="flex-1 px-6 py-3.5 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition-colors touch-target"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={isSubmitting || !selectedAsset || qtyNum <= 0 || hasInsufficientBalance || !destinationPortfolioId || availablePortfolios.length === 0}
-          className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium rounded-lg transition-colors"
+          className="flex-1 px-6 py-3.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium rounded-lg transition-colors touch-target"
         >
           {isSubmitting ? 'Processing...' : 'Transfer Asset'}
         </button>

@@ -15,7 +15,7 @@ import { ClosedPositionsPanel } from './components/ClosedPositionsPanel';
 import { TransactionHistoryPage } from './components/TransactionHistory';
 import { calculateRealizedPnL, detectAssetNativeCurrency, getHistoricalPrice, isCashAsset } from './services/portfolioService';
 import { validateBuyTransaction } from './services/cashFlowValidation'; // P3: Cash Flow Validation
-import { Wallet, Download, Upload, Settings, Key, FolderOpen, Plus, Check, History } from 'lucide-react';
+import { Wallet, Download, Upload, Settings, Key, FolderOpen, Plus, Check, History, Menu } from 'lucide-react';
 import { testPhase1 } from './services/riskMetricsService'; // P1.2 TEST IMPORT
 import { createDefaultBenchmarkSettings, fetchMultipleBenchmarks, BenchmarkTimeRange } from './services/benchmarkService'; // Benchmark comparison
 import { PORTFOLIO_COLORS, migrateToPortfolios, migrateTransactionTags } from './services/portfolioMigration'; // Portfolio migration
@@ -27,6 +27,7 @@ import { useTransactionHandlers } from './hooks/useTransactionHandlers'; // Tran
 import { useTransactionModifiers } from './hooks/useTransactionModifiers'; // Transaction removal/editing
 import { useAssetNotes } from './hooks/useAssetNotes'; // Asset notes management
 import { NoteModal } from './components/NoteModal'; // Asset notes modal
+import { MobileMenu } from './components/MobileMenu'; // Mobile navigation
 
 const App: React.FC = () => {
   // Portfolio state management (extracted to usePortfolios hook)
@@ -51,6 +52,7 @@ const App: React.FC = () => {
   const [sellModalAsset, setSellModalAsset] = useState<Asset | null>(null); // P2: Sell modal state
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false); // P3: Transaction modal state
   const [showTransactionHistory, setShowTransactionHistory] = useState(false); // Transaction History view toggle
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // Mobile navigation menu
   // Quick transaction pre-selection state (for opening modal from position card icons)
   const [quickTransactionAsset, setQuickTransactionAsset] = useState<string | undefined>(undefined);
   const [quickTransactionType, setQuickTransactionType] = useState<'DEPOSIT' | 'BUY' | 'SELL' | 'WITHDRAW' | 'TRANSFER' | 'INCOME' | undefined>(undefined);
@@ -385,13 +387,38 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 pb-20">
       <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-screen-2xl mx-auto px-8 py-4 flex items-center justify-between">
+        <div className="max-w-screen-2xl mx-auto px-4 md:px-8 py-3 md:py-4 flex items-center justify-between">
+          {/* Mobile: Hamburger + Logo */}
           <div className="flex items-center gap-3">
+            {/* Hamburger Menu - Mobile Only */}
+            <button
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="md:hidden p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 touch-target"
+              aria-label="Open menu"
+            >
+              <Menu size={24} />
+            </button>
+
             <div className="bg-indigo-600 p-2 rounded-lg"><Wallet className="text-white" size={24} /></div>
-            <h1 className="text-xl font-bold text-white">Portfolio Tracker</h1>
+            <h1 className="text-xl font-bold text-white hidden sm:block">Portfolio Tracker</h1>
+
+            {/* Mobile: Show active portfolio name */}
             {activePortfolio && (
-              <div className="relative group">
-                <button 
+              <div className="md:hidden flex items-center gap-2 px-2 py-1 rounded-lg bg-slate-800/50">
+                <div
+                  className="w-2 h-2 rounded-full"
+                  style={{ backgroundColor: activePortfolio.color }}
+                />
+                <span className="text-sm font-medium text-slate-300 truncate max-w-[120px]">
+                  {activePortfolio.name}
+                </span>
+              </div>
+            )}
+
+            {/* Desktop: Portfolio Dropdown */}
+            {activePortfolio && (
+              <div className="relative group hidden md:block">
+                <button
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/50 hover:bg-slate-800 transition-colors"
                   style={{ borderLeftColor: activePortfolio.color, borderLeftWidth: '3px' }}
                 >
@@ -403,8 +430,8 @@ const App: React.FC = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
-                
-                {/* Dropdown Menu */}
+
+                {/* Dropdown Menu - Desktop */}
                 <div className="absolute top-full left-0 mt-2 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
                   <div className="p-2 max-h-80 overflow-y-auto">
                     {portfolios.map(portfolio => (
@@ -417,7 +444,7 @@ const App: React.FC = () => {
                             : 'hover:bg-slate-700/50 text-slate-300'
                         }`}
                       >
-                        <div 
+                        <div
                           className="w-2 h-2 rounded-full"
                           style={{ backgroundColor: portfolio.color }}
                         />
@@ -441,8 +468,8 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* View Toggle Tabs */}
-            <div className="flex items-center gap-1 ml-4 bg-slate-800/50 rounded-lg p-1 border border-slate-700">
+            {/* View Toggle Tabs - Desktop Only */}
+            <div className="hidden md:flex items-center gap-1 ml-4 bg-slate-800/50 rounded-lg p-1 border border-slate-700">
               <button
                 onClick={() => setShowTransactionHistory(false)}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -466,7 +493,35 @@ const App: React.FC = () => {
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          {/* Mobile: Minimal view toggle */}
+          <div className="flex md:hidden items-center gap-1 bg-slate-800/50 rounded-lg p-1 border border-slate-700">
+            <button
+              onClick={() => setShowTransactionHistory(false)}
+              className={`p-2 rounded-md transition-colors ${
+                !showTransactionHistory
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-slate-400'
+              }`}
+              title="Dashboard"
+            >
+              <Wallet size={18} />
+            </button>
+            <button
+              onClick={() => setShowTransactionHistory(true)}
+              className={`p-2 rounded-md transition-colors ${
+                showTransactionHistory
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-slate-400'
+              }`}
+              title="Transactions"
+            >
+              <History size={18} />
+            </button>
+          </div>
+
+          {/* Desktop: Action Buttons */}
+          <div className="hidden md:flex items-center gap-2">
             <button
               onClick={() => setIsPortfolioManagerOpen(true)}
               className="p-2 text-slate-400 hover:text-white transition-colors"
@@ -474,8 +529,8 @@ const App: React.FC = () => {
             >
               <FolderOpen size={20} />
             </button>
-            <button 
-              onClick={() => setIsSettingsOpen(true)} 
+            <button
+              onClick={() => setIsSettingsOpen(true)}
               className={`p-2 rounded-lg transition-colors ${hasApiKey ? 'text-emerald-400 hover:text-emerald-300' : 'text-amber-400 hover:text-amber-300 animate-pulse'}`}
               title={hasApiKey ? "API Key Configured" : "Configure API Key"}
             >
@@ -489,7 +544,7 @@ const App: React.FC = () => {
       </header>
 
       {!hasApiKey && (
-        <div className="max-w-screen-2xl mx-auto px-8 pt-4">
+        <div className="max-w-screen-2xl mx-auto px-4 md:px-8 pt-4">
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 flex items-start gap-3">
             <Key className="text-amber-400 flex-shrink-0 mt-0.5" size={20} />
             <div className="flex-1">
@@ -518,7 +573,7 @@ const App: React.FC = () => {
           activePortfolioName={activePortfolio?.name || 'Portfolio'}
         />
       ) : (
-        <main className="max-w-screen-2xl mx-auto px-8 py-8">
+        <main className="max-w-screen-2xl mx-auto px-4 md:px-8 py-4 md:py-8">
           {/* P1.1 CHANGE: Pass displayCurrency, setDisplayCurrency, and exchangeRates to Summary */}
           {/* P2: Pass closedPositions for realized P&L */}
           <Summary
@@ -683,6 +738,23 @@ const App: React.FC = () => {
           }
         }}
         onClose={() => setNoteModalAsset(null)}
+      />
+
+      {/* Mobile Navigation Menu */}
+      <MobileMenu
+        isOpen={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
+        portfolios={portfolios}
+        activePortfolioId={activePortfolioId}
+        activePortfolio={activePortfolio}
+        onSelectPortfolio={setActivePortfolioId}
+        onOpenPortfolioManager={() => setIsPortfolioManagerOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onExport={exportPortfolio}
+        onImport={() => fileInputRef.current?.click()}
+        hasApiKey={hasApiKey}
+        showTransactionHistory={showTransactionHistory}
+        onToggleView={setShowTransactionHistory}
       />
 
     </div>

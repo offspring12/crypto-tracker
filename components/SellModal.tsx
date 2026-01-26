@@ -142,19 +142,19 @@ export const SellModal: React.FC<SellModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-0 md:p-4"
       onClick={handleBackdropClick}
     >
-      <div className="bg-slate-800 rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-700 max-h-[90vh] overflow-y-auto">
+      <div className="bg-slate-800 rounded-none md:rounded-xl w-full h-full md:max-w-md md:h-auto p-4 md:p-6 shadow-2xl border-0 md:border border-slate-700 md:max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <TrendingDown className="text-rose-400" size={24} />
-            <h2 className="text-xl font-bold text-white">Sell {asset.name || asset.ticker}</h2>
+        <div className="flex items-center justify-between mb-4 md:mb-6">
+          <div className="flex items-center gap-2 min-w-0">
+            <TrendingDown className="text-rose-400 flex-shrink-0" size={24} />
+            <h2 className="text-lg md:text-xl font-bold text-white truncate">Sell {asset.name || asset.ticker}</h2>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors"
+            className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700 rounded-lg touch-target flex-shrink-0"
             aria-label="Close"
           >
             <X size={24} />
@@ -437,19 +437,19 @@ export const SellModal: React.FC<SellModalProps> = ({
           )}
 
           {/* Submit Buttons */}
-          <div className="flex gap-3 pt-2">
+          <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 text-white rounded-lg transition-colors font-medium"
+              className="flex-1 px-4 py-3.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 text-white rounded-lg transition-colors font-medium touch-target"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!canSell || isSubmitting}
-              className="flex-1 px-4 py-3 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+              className="flex-1 px-4 py-3.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium touch-target"
             >
               {isSubmitting ? 'Selling...' : `Sell ${asset.ticker}`}
             </button>

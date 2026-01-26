@@ -134,34 +134,34 @@ export const NoteModal: React.FC<NoteModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-0 md:p-4"
       onClick={handleBackdropClick}
     >
-      <div className="bg-slate-800 rounded-xl max-w-2xl w-full shadow-2xl border border-slate-700 flex flex-col max-h-[90vh]">
+      <div className="bg-slate-800 rounded-none md:rounded-xl w-full h-full md:max-w-2xl md:h-auto shadow-2xl border-0 md:border border-slate-700 flex flex-col md:max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-amber-500/20">
+        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-700">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 rounded-lg bg-amber-500/20 flex-shrink-0">
               <FileText size={22} className="text-amber-400" />
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-white">
+            <div className="min-w-0">
+              <h2 className="text-base md:text-lg font-semibold text-white truncate">
                 Note for {assetName} ({assetSymbol})
               </h2>
-              <p className="text-sm text-slate-400">in {portfolioName}</p>
+              <p className="text-sm text-slate-400 truncate">in {portfolioName}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-slate-700 rounded-lg transition-colors text-slate-400"
+            className="p-2 hover:bg-slate-700 rounded-lg transition-colors text-slate-400 touch-target flex-shrink-0"
             title="Close (Esc)"
           >
-            <X size={20} />
+            <X size={24} />
           </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 p-5 overflow-y-auto">
+        <div className="flex-1 p-4 md:p-5 overflow-y-auto">
           {/* Delete confirmation banner */}
           {showDeleteConfirm && (
             <div className="mb-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
@@ -241,17 +241,17 @@ export const NoteModal: React.FC<NoteModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-700 bg-slate-900/50">
-          <div className="flex items-center justify-between">
+        <div className="p-4 border-t border-slate-700 bg-slate-900/50 safe-area-bottom">
+          <div className="flex items-center justify-between gap-2">
             {/* Delete button (only if existing note) */}
             <div>
               {existingNote && !showDeleteConfirm && (
                 <button
                   onClick={handleDeleteClick}
-                  className="flex items-center gap-2 px-3 py-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors text-sm"
+                  className="flex items-center gap-2 px-3 py-2.5 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors text-sm touch-target"
                 >
                   <Trash2 size={16} />
-                  Delete
+                  <span className="hidden sm:inline">Delete</span>
                 </button>
               )}
             </div>
@@ -260,13 +260,13 @@ export const NoteModal: React.FC<NoteModalProps> = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={onClose}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors text-sm"
+                className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors text-sm touch-target"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors text-sm font-medium"
+                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors text-sm font-medium touch-target"
               >
                 Save
               </button>

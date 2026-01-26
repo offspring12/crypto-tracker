@@ -203,8 +203,8 @@ export const BenchmarkToggleBar: React.FC<BenchmarkToggleBarProps> = ({
               setCustomTicker(e.target.value.toUpperCase());
               setValidationError(null);
             }}
-            className="px-3 py-1.5 bg-gray-900 border border-gray-600 rounded text-sm text-white
-                       placeholder-gray-500 focus:border-blue-500 focus:outline-none w-32"
+            className="px-3 py-2.5 md:py-1.5 bg-gray-900 border border-gray-600 rounded text-sm text-white
+                       placeholder-gray-500 focus:border-blue-500 focus:outline-none w-full sm:w-32"
             disabled={isValidating}
           />
           <input
@@ -212,40 +212,42 @@ export const BenchmarkToggleBar: React.FC<BenchmarkToggleBarProps> = ({
             placeholder="Name (optional)"
             value={customName}
             onChange={(e) => setCustomName(e.target.value)}
-            className="px-3 py-1.5 bg-gray-900 border border-gray-600 rounded text-sm text-white
-                       placeholder-gray-500 focus:border-blue-500 focus:outline-none w-40"
+            className="px-3 py-2.5 md:py-1.5 bg-gray-900 border border-gray-600 rounded text-sm text-white
+                       placeholder-gray-500 focus:border-blue-500 focus:outline-none w-full sm:w-40"
             disabled={isValidating}
           />
-          <button
-            onClick={handleAddCustom}
-            disabled={isValidating || !customTicker.trim()}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600
-                       disabled:cursor-not-allowed text-white text-sm rounded font-medium
-                       transition-colors flex items-center gap-1"
-          >
-            {isValidating ? (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span>Validating...</span>
-              </>
-            ) : (
-              <>
-                <Check className="w-3 h-3" />
-                <span>Add</span>
-              </>
-            )}
-          </button>
-          <button
-            onClick={() => {
-              setShowAddCustom(false);
-              setCustomTicker('');
-              setCustomName('');
-              setValidationError(null);
-            }}
-            className="px-3 py-1.5 text-gray-400 hover:text-white text-sm transition-colors"
-          >
-            Cancel
-          </button>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button
+              onClick={handleAddCustom}
+              disabled={isValidating || !customTicker.trim()}
+              className="flex-1 sm:flex-none px-3 py-2.5 md:py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600
+                         disabled:cursor-not-allowed text-white text-sm rounded font-medium
+                         transition-colors flex items-center justify-center gap-1 touch-target"
+            >
+              {isValidating ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>Validating...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-3 h-3" />
+                  <span>Add</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => {
+                setShowAddCustom(false);
+                setCustomTicker('');
+                setCustomName('');
+                setValidationError(null);
+              }}
+              className="flex-1 sm:flex-none px-3 py-2.5 md:py-1.5 text-gray-400 hover:text-white text-sm transition-colors touch-target"
+            >
+              Cancel
+            </button>
+          </div>
 
           {validationError && (
             <div className="w-full flex items-center gap-1 text-red-400 text-sm mt-1">

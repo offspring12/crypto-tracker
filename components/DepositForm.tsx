@@ -142,7 +142,7 @@ export const DepositForm: React.FC<DepositFormProps> = ({ onDeposit, onClose, in
       </div>
 
       {/* Quantity & Cost Basis Row */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-slate-300 mb-2">
             Quantity *
@@ -246,18 +246,18 @@ export const DepositForm: React.FC<DepositFormProps> = ({ onDeposit, onClose, in
       />
 
       {/* Submit Button */}
-      <div className="flex gap-3 pt-4">
+      <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4">
         <button
           type="button"
           onClick={onClose}
-          className="flex-1 px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition-colors"
+          className="flex-1 px-6 py-3.5 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition-colors touch-target"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={isSubmitting || !ticker.trim() || qtyNum <= 0 || costNum <= 0}
-          className="flex-1 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium rounded-lg transition-colors"
+          className="flex-1 px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-medium rounded-lg transition-colors touch-target"
         >
           {isSubmitting ? 'Creating...' : 'Create Deposit'}
         </button>

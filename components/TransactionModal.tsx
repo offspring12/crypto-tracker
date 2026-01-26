@@ -103,15 +103,15 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         />
       )}
       {/* P3: Hide TransactionModal when SellModal is open */}
-      <div className={`fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 ${selectedSellAsset ? 'hidden' : ''}`}>
+      <div className={`fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-0 md:p-4 ${selectedSellAsset ? 'hidden' : ''}`}>
         {/* P3: Increased modal size for better UX - no scrolling needed */}
-        <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-hidden flex flex-col">
+        <div className="bg-slate-800 rounded-none md:rounded-2xl border-0 md:border border-slate-700 shadow-2xl w-full h-full md:h-auto md:max-w-4xl md:max-h-[95vh] overflow-hidden flex flex-col">
           {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-slate-700">
-            <h2 className="text-2xl font-bold text-white">New Transaction</h2>
+          <div className="flex items-center justify-between p-4 md:p-6 border-b border-slate-700">
+            <h2 className="text-xl md:text-2xl font-bold text-white">New Transaction</h2>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+              className="p-2 hover:bg-slate-700 rounded-lg transition-colors touch-target"
               aria-label="Close modal"
             >
               <X className="text-slate-400" size={24} />
@@ -119,13 +119,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           </div>
 
         {/* Tab Selector */}
-        <div className="flex gap-1 p-4 bg-slate-900/50 border-b border-slate-700 overflow-x-auto">
+        <div className="flex gap-1 p-2 md:p-4 bg-slate-900/50 border-b border-slate-700 overflow-x-auto hide-scrollbar">
           {tabs.map(({ type, label, icon: Icon, color }) => (
             <button
               key={type}
               onClick={() => setActiveTab(type)}
               className={`
-                flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all whitespace-nowrap
+                flex items-center gap-1.5 md:gap-2 px-3 md:px-4 py-2.5 rounded-lg font-medium transition-all whitespace-nowrap text-sm md:text-base touch-target
                 ${activeTab === type
                   ? `bg-${color}-600 text-white shadow-lg`
                   : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
@@ -133,13 +133,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               `}
             >
               <Icon size={18} />
-              {label}
+              <span className="hidden sm:inline">{label}</span>
             </button>
           ))}
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
           {activeTab === 'DEPOSIT' && (
             <DepositForm onDeposit={onDeposit} onClose={onClose} initialTicker={initialAssetTicker} />
           )}

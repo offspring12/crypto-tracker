@@ -40,13 +40,13 @@ export const ApiKeySettings: React.FC<ApiKeySettingsProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-0 md:p-4">
+      <div className="bg-slate-800 border-0 md:border border-slate-700 rounded-none md:rounded-2xl shadow-2xl w-full h-full md:h-auto md:max-w-md p-4 md:p-6 relative overflow-y-auto">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+          className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-700 rounded-lg touch-target"
         >
-          <X size={20} />
+          <X size={24} />
         </button>
 
         <div className="flex items-center gap-3 mb-6">
