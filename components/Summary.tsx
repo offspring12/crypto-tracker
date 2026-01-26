@@ -2,6 +2,7 @@ import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { PortfolioSummary, Asset, Currency, ClosedPosition, BenchmarkSettings, ChartBenchmarkData, BenchmarkData } from '../types';
 import { fetchExchangeRates, convertCurrencySync, fetchHistoricalExchangeRates, convertCurrencySyncHistorical } from '../services/currencyService';
 import { TrendingUp, PieChart, Clock, RefreshCw, TrendingDown, AlertTriangle, Scale, Plus, Download } from 'lucide-react';
+import { isCashAsset } from '../services/portfolioService';
 import { exportHoldingsToCSV } from '../utils/csvExport';
 import { getRebalancingAlertCount, DEFAULT_REBALANCING_SETTINGS } from '../services/rebalancingService';
 import { RebalancingModal } from './RebalancingModal';
@@ -66,6 +67,9 @@ interface ChartDataPoint {
   marketValue: number;
   stack: Record<string, number>;
   costStack: Record<string, number>;
+  // Per-asset acquisition cost (for tooltip P&L calculation)
+  // This tracks actual cost of acquiring each asset (BUY/DEPOSIT/INCOME minus SELL/WITHDRAWAL)
+  acquisitionCostStack: Record<string, number>;
 }
 
 // P1.1 CHANGE: Destructure displayCurrency, setDisplayCurrency, and exchangeRates from props
@@ -415,11 +419,14 @@ export const Summary: React.FC<SummaryProps> = ({
         let totalVal = 0;
         const stack: Record<string, number> = {};
         const costStack: Record<string, number> = {};
+        const acquisitionCostStack: Record<string, number> = {};
         
         assets.forEach(asset => {
             // A. Calculate Cumulative Quantity and FX-Adjusted Cost at time t
             let qtyAtTime = 0;
             let costInDisplayAtTime = 0;
+            // Track actual acquisition cost for this asset (for P&L calculation in tooltip)
+            let acquisitionCostAtTime = 0;
 
             asset.transactions.forEach(tx => {
                const txTime = new Date(tx.date).getTime();
@@ -431,18 +438,7 @@ export const Summary: React.FC<SummaryProps> = ({
                      qtyAtTime += tx.quantity;
                    }
 
-                   // Cost basis logic: Only external capital flows affect the "total invested" line
-                   // - DEPOSIT: adds (money coming in)
-                   // - INCOME: adds (value coming in - dividends, staking, etc.)
-                   // - WITHDRAWAL: subtracts (money going out)
-                   // - TRANSFER: destination portfolio adds (via transferredFrom flag)
-                   // - BUY/SELL: no change (internal reshuffling of existing capital)
-
-                   // Skip BUY and SELL - they're internal reshuffling, not new capital
-                   if (tx.type === 'SELL') return;
-                   if (tx.type === 'BUY') return;
-
-                   // Calculate cost in display currency
+                   // Calculate cost in display currency for this transaction
                    let costInDisplay = 0;
                    if (tx.exchangeRateAtPurchase && tx.purchaseCurrency) {
                      costInDisplay = convertCurrencySync(
@@ -464,7 +460,28 @@ export const Summary: React.FC<SummaryProps> = ({
                      );
                    }
 
-                   // Apply cost based on transaction type
+                   // Track per-asset acquisition cost (for tooltip P&L)
+                   // This includes ALL transactions that affect the asset's cost basis
+                   if (tx.type === 'BUY' || tx.type === 'DEPOSIT' || tx.type === 'INCOME') {
+                     acquisitionCostAtTime += costInDisplay;
+                   } else if (tx.type === 'SELL' || tx.type === 'WITHDRAWAL' || tx.type === 'TRANSFER') {
+                     // For disposals, reduce cost proportionally
+                     // But we need to be careful not to go negative
+                     acquisitionCostAtTime -= costInDisplay;
+                   }
+
+                   // Cost basis logic for the "total invested" LINE: Only external capital flows
+                   // - DEPOSIT: adds (money coming in)
+                   // - INCOME: adds (value coming in - dividends, staking, etc.)
+                   // - WITHDRAWAL: subtracts (money going out)
+                   // - TRANSFER: destination portfolio adds (via transferredFrom flag)
+                   // - BUY/SELL: no change (internal reshuffling of existing capital)
+
+                   // Skip BUY and SELL for the capital flow line - they're internal reshuffling
+                   if (tx.type === 'SELL') return;
+                   if (tx.type === 'BUY') return;
+
+                   // Apply cost based on transaction type for the total invested line
                    if (tx.type === 'WITHDRAWAL') {
                      // Withdrawal reduces cost basis (money leaving portfolio)
                      costInDisplayAtTime -= costInDisplay;
@@ -479,14 +496,17 @@ export const Summary: React.FC<SummaryProps> = ({
             if (qtyAtTime <= 0) {
                 stack[asset.id] = 0;
                 costStack[asset.id] = 0;
+                acquisitionCostStack[asset.id] = 0;
                 return;
             }
 
             // Detect currency from ticker/asset
             const assetCurrency = asset.currency || detectCurrencyFromTicker(asset.ticker);
 
-            // Store the cost basis in display currency
+            // Store the cost basis in display currency (for total invested line)
             costStack[asset.id] = costInDisplayAtTime;
+            // Store actual acquisition cost (for per-asset P&L in tooltip)
+            acquisitionCostStack[asset.id] = acquisitionCostAtTime;
 
             // 🔧 FIX: Check if this is a cash asset (ticker is a currency code)
             const isCashAsset = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD'].includes(asset.ticker.toUpperCase());
@@ -580,7 +600,8 @@ export const Summary: React.FC<SummaryProps> = ({
             costBasis: totalCost,
             marketValue: totalVal,
             stack,
-            costStack
+            costStack,
+            acquisitionCostStack
         });
     }
 
@@ -1082,23 +1103,29 @@ export const Summary: React.FC<SummaryProps> = ({
                             {assets
                                 .map((a, i) => {
                                     const val = hoverData.data.stack[a.id] || 0;
-                                    const cost = hoverData.data.costStack[a.id] || 0;
-                                    const pl = val - cost;
-                                    const plPct = cost > 0 ? (pl / cost) * 100 : 0;
-                                    
-                                    return { 
+                                    // Use acquisitionCostStack for per-asset P&L (actual cost of acquiring each asset)
+                                    const cost = hoverData.data.acquisitionCostStack[a.id] || 0;
+
+                                    // Cash assets (CHF, USD, etc.) have no P&L - they are the currency itself
+                                    const isCash = isCashAsset(a.ticker);
+                                    const pl = isCash ? 0 : val - cost;
+                                    const plPct = isCash ? 0 : (cost > 0 ? (pl / cost) * 100 : 0);
+
+                                    return {
                                         ticker: a.name || a.ticker,
+                                        rawTicker: a.ticker,
                                         currency: a.currency,
                                         val,
                                         pl,
                                         plPct,
+                                        isCash,
                                         color: CHART_COLORS[i % CHART_COLORS.length]
                                     };
                                 })
                                 .filter(item => item.val > 0)
                                 .sort((a, b) => b.val - a.val)
                                 .map((item) => (
-                                    <div key={item.ticker} className="grid grid-cols-3 items-center text-xs">
+                                    <div key={item.rawTicker} className="grid grid-cols-3 items-center text-xs">
                                         <div className="flex items-center gap-1.5 col-span-1">
                                             <div className="w-2 h-2 rounded-full" style={{ background: item.color }} />
                                             <span className="text-slate-300 font-medium">
@@ -1109,14 +1136,14 @@ export const Summary: React.FC<SummaryProps> = ({
                                             </span>
                                         </div>
                                         <div className="text-right text-slate-400 col-span-1">
-                                            {new Intl.NumberFormat('en-US', { 
-                                              style: 'currency', 
-                                              currency: displayCurrency, 
-                                              notation: 'compact' 
+                                            {new Intl.NumberFormat('en-US', {
+                                              style: 'currency',
+                                              currency: displayCurrency,
+                                              notation: 'compact'
                                             }).format(item.val)}
                                         </div>
-                                        <div className={`text-right col-span-1 ${item.pl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                            {item.pl >= 0 ? '+' : ''}{item.plPct.toFixed(1)}%
+                                        <div className={`text-right col-span-1 ${item.isCash ? 'text-slate-400' : (item.pl >= 0 ? 'text-emerald-400' : 'text-rose-400')}`}>
+                                            {item.isCash ? '—' : `${item.pl >= 0 ? '+' : ''}${item.plPct.toFixed(1)}%`}
                                         </div>
                                     </div>
                                 ))
